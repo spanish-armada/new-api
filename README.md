@@ -240,6 +240,20 @@ docker compose logs -f new-api
 | `SESSION_COOKIE_TRUSTED_URL` | Required in Secure mode: comma-separated exact HTTPS origins, without paths or wildcards; leave unset for local HTTP |
 | `TRUSTED_PROXIES` | Trusted reverse-proxy IPs/CIDRs, or `none`; explicitly configure for your network |
 
+### Quota units and currency conversion
+
+Quota values are stored as integer quota units, not as dollars or yuan. API quota fields, including `used_quota`, use these raw units.
+
+`QuotaPerUnit` defines how many quota units equal USD 1. Its default is 500,000, so 500,000 quota units equal USD 1. In CNY display mode, the displayed amount is:
+
+```text
+quota units / QuotaPerUnit × USDExchangeRate
+```
+
+For example, with the default `QuotaPerUnit` and `USDExchangeRate` set to 7 CNY per USD, `used_quota: 500000` is displayed as ¥7. Configure the display mode and `CNY per USD` rate in **System Settings → Billing → Currency & Display**. This rate changes the currency display conversion; it does not change the stored quota units.
+
+`QuotaPerUnit` is separate from the USD-to-CNY exchange rate. The current console displays it as read-only; changing this system-wide quota-to-USD conversion can affect billing and quota interpretation.
+
 See the [environment example](./.env.example), [environment reference](https://docs.newapi.ai/en/docs/installation/config-maintenance/environment-variables), and [authentication and session guide](./docs/authentication.md) for full configuration. Configure container variables in Compose's `environment` or `env_file`; copying `.env.example` alone does not inject variables into the container.
 
 For production, put the console behind HTTPS and configure your reverse proxy for streaming and WebSocket upgrades. Persist and back up the database and mounted data. Multi-node deployments must share the main database and authentication secrets; separate Redis instances or in-memory rate limiters count limits independently per node. The session guide describes propagation behavior for each topology.

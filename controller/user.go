@@ -335,7 +335,25 @@ func Register(c *gin.Context) {
 	return
 }
 
+// requireRootUser stops the request unless the caller is the root account. The
+// user directory and account creation are root-only because they expose or
+// grant access to every account; the remaining account endpoints stay available
+// to administrators, who reach them from the usage-log and wallet pages.
+func requireRootUser(c *gin.Context) bool {
+	if c.GetInt("role") == common.RoleRootUser {
+		return true
+	}
+	common.ApiErrorStatus(c, http.StatusForbidden, common.NewMessage("Unauthorized, insufficient privileges"), gin.H{
+		"code": "AUTH_INSUFFICIENT_PRIVILEGE",
+	})
+	return false
+}
+
 func GetAllUsers(c *gin.Context) {
+	if !requireRootUser(c) {
+		return
+	}
+
 	pageInfo := common.GetPageQuery(c)
 	sortOptions := model.NewUserSortOptions(c.Query("sort_by"), c.Query("sort_order"))
 	users, total, err := model.GetAllUsers(pageInfo, sortOptions)
@@ -352,6 +370,9 @@ func GetAllUsers(c *gin.Context) {
 }
 
 func SearchUsers(c *gin.Context) {
+	if !requireRootUser(c) {
+		return
+	}
 	keyword := c.Query("keyword")
 	group := c.Query("group")
 	var role *int
@@ -998,6 +1019,9 @@ func DeleteSelf(c *gin.Context) {
 }
 
 func CreateUser(c *gin.Context) {
+	if !requireRootUser(c) {
+		return
+	}
 	var user model.User
 	err := common.DecodeJson(c.Request.Body, &user)
 	user.Username = strings.TrimSpace(user.Username)
@@ -1031,11 +1055,16 @@ func CreateUser(c *gin.Context) {
 		auditParams["verification_method"] = authorization.Method
 	}
 	// Even for admin users, we cannot fully trust them!
+	// The group is the billing dimension, not an identity: it stays on the
+	// request value and falls back to the column default, exactly like
+	// self-registration and OAuth sign-up. Forcing a per-user group here left
+	// every new user in a group no channel serves.
 	cleanUser := model.User{
 		Username:    user.Username,
 		Password:    user.Password,
 		DisplayName: user.DisplayName,
 		Role:        user.Role, // 保持管理员设置的角色
+		Group:       user.Group,
 	}
 	authzTouched := false
 	if err := model.DB.Transaction(func(tx *gorm.DB) error {

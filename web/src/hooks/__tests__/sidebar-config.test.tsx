@@ -215,16 +215,23 @@ describe('model pricing badge', () => {
   /** Lists the sidebar entries of the current view that carry a badge. */
   function BadgedEntries() {
     const { navGroups } = useSidebarView()
-    const entries = navGroups
-      .flatMap((group) => group.items)
+    const items = navGroups.flatMap((group) => group.items)
+    const entries = items
       .flatMap((item) => [item, ...(item.items ?? [])])
       .filter((item) => item.badge)
     return (
-      <ul aria-label='Badged entries'>
-        {entries.map((item) => (
-          <li key={item.title}>{`${item.title}: ${item.badge}`}</li>
-        ))}
-      </ul>
+      <>
+        <ul aria-label='Sidebar entries'>
+          {items.map((item) => (
+            <li key={item.title}>{item.title}</li>
+          ))}
+        </ul>
+        <ul aria-label='Badged entries'>
+          {entries.map((item) => (
+            <li key={item.title}>{`${item.title}: ${item.badge}`}</li>
+          ))}
+        </ul>
+      </>
     )
   }
 
@@ -318,5 +325,17 @@ describe('model pricing badge', () => {
     ).toBeInTheDocument()
     expect(get).not.toHaveBeenCalledWith('/api/option/model_pricing/issues')
     expect(badgedEntries()).toHaveLength(0)
+  })
+
+  it('hides the Users entry from administrators in the main sidebar', async () => {
+    await renderSidebar('/dashboard/overview', ROLE.ADMIN, () => [])
+
+    expect(screen.queryByText('Users')).not.toBeInTheDocument()
+  })
+
+  it('shows the Users entry to Root in the main sidebar', async () => {
+    await renderSidebar('/dashboard/overview', ROLE.SUPER_ADMIN, () => [])
+
+    expect(screen.getByText('Users')).toBeInTheDocument()
   })
 })

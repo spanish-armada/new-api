@@ -20,12 +20,17 @@ import { Plus } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 import { Button } from '@/components/ui/button'
+import { ROLE } from '@/lib/roles'
+import { useAuthStore } from '@/stores/auth-store'
 
 import { useUsers } from './users-provider'
 
 export function UsersPrimaryButtons() {
   const { t } = useTranslation()
   const { setOpen, setCurrentRow } = useUsers()
+  const currentUser = useAuthStore((s) => s.auth.user)
+
+  if (currentUser?.role !== ROLE.SUPER_ADMIN) return null
 
   const handleCreate = () => {
     setCurrentRow(null)

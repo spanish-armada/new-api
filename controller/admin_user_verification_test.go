@@ -201,30 +201,77 @@ func TestAdminUserRoutineEditsDoNotRequireProof(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "Renamed", stored.DisplayName)
 	assert.True(t, common.ValidatePasswordAndHash("managed-password", stored.Password))
+}
 
-	response = adminUserRequest(http.MethodPost, "/api/user/", `{"username":"new-member","password":"member-password-1","role":1}`, "", identity, common.RoleAdminUser, nil, CreateUser)
+func TestUserListEndpointsRequireRootRole(t *testing.T) {
+	_, identity, target := setupAdminUserTest(t)
+	for _, test := range []struct {
+		name, path string
+		handler    gin.HandlerFunc
+	}{
+		{name: "all users", path: "/api/user/", handler: GetAllUsers},
+		{name: "search users", path: "/api/user/search?keyword=managed-user", handler: SearchUsers},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			response := adminUserRequest(http.MethodGet, test.path, "", "", identity, common.RoleAdminUser, nil, test.handler)
+			var denied securityEnrollmentResponse
+			require.NoError(t, common.Unmarshal(response.Body.Bytes(), &denied))
+			assert.Equal(t, http.StatusForbidden, response.Code)
+			assert.Equal(t, "AUTH_INSUFFICIENT_PRIVILEGE", denied.Code)
+			assert.NotContains(t, response.Body.String(), target.Username)
+
+			response = adminUserRequest(http.MethodGet, test.path, "", "", identity, common.RoleRootUser, nil, test.handler)
+			require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+			assert.Contains(t, response.Body.String(), target.Username)
+		})
+	}
+}
+
+func TestCreateUserRequiresRootRole(t *testing.T) {
+	_, identity, _ := setupAdminUserTest(t)
+	body := `{"username":"new-member","password":"member-password-1","role":1}`
+
+	response := adminUserRequest(http.MethodPost, "/api/user/", body, "", identity, common.RoleAdminUser, nil, CreateUser)
+	var result securityEnrollmentResponse
 	require.NoError(t, common.Unmarshal(response.Body.Bytes(), &result))
-	require.True(t, result.Success, response.Body.String())
+	assert.Equal(t, http.StatusForbidden, response.Code)
+	assert.False(t, result.Success)
+	assert.Equal(t, "AUTH_INSUFFICIENT_PRIVILEGE", result.Code)
 	var count int64
 	require.NoError(t, model.DB.Model(&model.User{}).Where("username = ?", "new-member").Count(&count).Error)
+	assert.Zero(t, count)
+
+	proof := issueSecurityEnrollmentProof(t, identity, service.VerificationOperation{
+		Scope:   service.VerificationScopeAdminUserCreate,
+		Context: []byte(`{"role":10}`),
+	}, service.VerificationMethodPassword)
+	response = adminUserRequest(http.MethodPost, "/api/user/", `{"username":"new-admin","password":"admin-password-1","role":10}`, proof, identity, common.RoleRootUser, nil, CreateUser)
+	require.NoError(t, common.Unmarshal(response.Body.Bytes(), &result))
+	require.True(t, result.Success, response.Body.String())
+	require.NoError(t, model.DB.Model(&model.User{}).Where("username = ?", "new-admin").Count(&count).Error)
 	assert.EqualValues(t, 1, count)
+	// The group stays the billing dimension requested by the caller (or the
+	// column default), never the username: a per-user group would leave the
+	// account in a group no channel serves.
+	var created model.User
+	require.NoError(t, model.DB.Where("username = ?", "new-admin").First(&created).Error)
+	assert.Equal(t, "default", created.Group)
 }
 
 func TestCreateUserRejectsNonStandardRole(t *testing.T) {
 	_, identity, _ := setupAdminUserTest(t)
 	for i, test := range []struct {
-		name         string
-		role         int
-		operatorRole int
+		name string
+		role int
 	}{
-		{"between common and admin", 5, common.RoleAdminUser},
-		{"negative", -1, common.RoleAdminUser},
-		{"between admin and root", 99, common.RoleRootUser},
+		{"between common and admin", 5},
+		{"negative", -1},
+		{"between admin and root", 99},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			username := fmt.Sprintf("odd-role-%d", i)
 			body := fmt.Sprintf(`{"username":%q,"password":"member-password-1","role":%d}`, username, test.role)
-			response := adminUserRequest(http.MethodPost, "/api/user/", body, "", identity, test.operatorRole, nil, CreateUser)
+			response := adminUserRequest(http.MethodPost, "/api/user/", body, "", identity, common.RoleRootUser, nil, CreateUser)
 			var result securityEnrollmentResponse
 			require.NoError(t, common.Unmarshal(response.Body.Bytes(), &result))
 			assert.Equal(t, http.StatusOK, response.Code)

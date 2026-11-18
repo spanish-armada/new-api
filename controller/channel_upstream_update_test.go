@@ -227,6 +227,7 @@ func TestFetchModelsAdvancedCustomCreatePreview(t *testing.T) {
 
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Set("role", common.RoleRootUser)
 	ctx.Request = httptest.NewRequest(http.MethodPost, "/api/channel/fetch_models", bytes.NewReader(body))
 	ctx.Request.Header.Set("Content-Type", "application/json")
 	FetchModels(ctx)
@@ -310,6 +311,7 @@ func TestFetchModelsAdvancedCustomEditPreviewUsesSavedKeyAndExplicitClears(t *te
 
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Set("role", common.RoleRootUser)
 	ctx.Request = httptest.NewRequest(http.MethodPost, "/api/channel/fetch_models", bytes.NewReader(body))
 	ctx.Request.Header.Set("Content-Type", "application/json")
 	FetchModels(ctx)

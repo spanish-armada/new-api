@@ -144,6 +144,16 @@ func TestUsageAccountingSupportsSignedDirectAndBatchDeltas(t *testing.T) {
 	assert.Equal(t, 3, got.RequestCount)
 	require.NoError(t, DB.Select("used_quota").First(&gotChannel, channel.Id).Error)
 	assert.Equal(t, int64(1150), gotChannel.UsedQuota)
+
+	UpdateChannelUsedQuota(channel.Id, 400)
+	require.NoError(t, SetChannelUsedQuota(channel.Id, 25))
+	require.NoError(t, DB.Select("used_quota").First(&gotChannel, channel.Id).Error)
+	assert.Equal(t, int64(25), gotChannel.UsedQuota, "a quota reset must consume older queued deltas before setting its target")
+
+	UpdateChannelUsedQuota(channel.Id, 10)
+	batchUpdate()
+	require.NoError(t, DB.Select("used_quota").First(&gotChannel, channel.Id).Error)
+	assert.Equal(t, int64(35), gotChannel.UsedQuota, "usage queued after a reset must still be applied")
 }
 
 func TestRevokeUserAccessTokenOnlyClearsLegacyToken(t *testing.T) {

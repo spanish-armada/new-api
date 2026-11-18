@@ -420,6 +420,16 @@ func SyncUpstreamModels(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "Preview and select metadata changes before applying"})
 		return
 	}
+	if c.GetInt("role") != common.RoleRootUser {
+		for _, selection := range request.Selections {
+			if selection.Create {
+				common.ApiErrorStatus(c, http.StatusForbidden, common.NewMessage("Unauthorized, insufficient privileges"), gin.H{
+					"code": "AUTH_INSUFFICIENT_PRIVILEGE",
+				})
+				return
+			}
+		}
+	}
 	source, upstream, vendors, err := fetchMetadataCatalog(c, request.Locale)
 	if err != nil {
 		common.ApiError(c, err)

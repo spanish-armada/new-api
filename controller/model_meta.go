@@ -105,6 +105,11 @@ func GetModelMeta(c *gin.Context) {
 
 // CreateModelMeta 新建模型
 func CreateModelMeta(c *gin.Context) {
+	// Adding a model defines a billable object, so it is root-only; maintaining
+	// existing model metadata stays available to administrators.
+	if !requireRootUser(c) {
+		return
+	}
 	var m model.Model
 	if err := c.ShouldBindJSON(&m); err != nil {
 		common.ApiError(c, err)

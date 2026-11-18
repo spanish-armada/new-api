@@ -30,6 +30,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { api } from '@/lib/api'
+import { ROLE } from '@/lib/roles'
 import { Route as UsersRoute } from '@/routes/_authenticated/users/index'
 import { useAuthStore } from '@/stores/auth-store'
 
@@ -43,7 +44,9 @@ const premiumSearchUrl =
 beforeEach(() => {
   vi.spyOn(window, 'scrollTo').mockImplementation(() => {})
   localStorage.clear()
-  useAuthStore.getState().auth.setUser({ id: 1, username: 'admin', role: 100 })
+  useAuthStore
+    .getState()
+    .auth.setUser({ id: 1, username: 'admin', role: ROLE.SUPER_ADMIN })
 })
 
 afterEach(() => {
@@ -52,7 +55,14 @@ afterEach(() => {
   useAuthStore.getState().auth.reset()
 })
 
-async function renderUsers(initialEntry = '/users/') {
+async function renderUsers(
+  initialEntry = '/users/',
+  viewerRole: number = ROLE.SUPER_ADMIN,
+  expectUsers = true
+) {
+  useAuthStore
+    .getState()
+    .auth.setUser({ id: 1, username: 'admin', role: viewerRole })
   const get = vi.spyOn(api, 'get').mockImplementation(async (url) => {
     if (url === '/api/group/') {
       return { data: { success: true, data: ['default', 'premium'] } }
@@ -66,6 +76,7 @@ async function renderUsers(initialEntry = '/users/') {
               id: 2,
               username: 'premium-user',
               display_name: '',
+              remark: 'Internal note',
               role: 1,
               status: 1,
               quota: 0,
@@ -84,6 +95,9 @@ async function renderUsers(initialEntry = '/users/') {
   const users = createRoute({
     getParentRoute: () => auth,
     path: 'users/',
+    beforeLoad: () => {
+      UsersRoute.options.beforeLoad?.({} as never)
+    },
     validateSearch: UsersRoute.options.validateSearch,
     component: () => (
       <TooltipProvider>
@@ -93,8 +107,13 @@ async function renderUsers(initialEntry = '/users/') {
       </TooltipProvider>
     ),
   })
+  const forbidden = createRoute({
+    getParentRoute: () => root,
+    path: '403',
+    component: () => null,
+  })
   const router = createRouter({
-    routeTree: root.addChildren([auth.addChildren([users])]),
+    routeTree: root.addChildren([auth.addChildren([users]), forbidden]),
     history: createMemoryHistory({ initialEntries: [initialEntry] }),
   })
   const client = new QueryClient({
@@ -107,7 +126,7 @@ async function renderUsers(initialEntry = '/users/') {
       <RouterProvider router={router} />
     </QueryClientProvider>
   )
-  await screen.findByText('premium-user')
+  if (expectUsers) await screen.findByText('premium-user')
   return { get, router }
 }
 
@@ -151,4 +170,18 @@ it('restores the user group filter from the page URL on load', async () => {
   expect(get).toHaveBeenCalledWith(premiumSearchUrl)
   expect(get).not.toHaveBeenCalledWith('/api/user/', expect.anything())
   expect(getGroupFilterTrigger()).toHaveTextContent('premium')
+})
+
+it('shows user remarks to Root', async () => {
+  await renderUsers()
+
+  expect(await screen.findByText('Internal note')).toBeInTheDocument()
+})
+
+it('redirects non-Root roles from the users list before fetching user data', async () => {
+  const { get, router } = await renderUsers('/users/', ROLE.ADMIN, false)
+
+  expect(router.state.location.pathname).toBe('/403')
+  expect(get).not.toHaveBeenCalledWith('/api/user/', expect.anything())
+  expect(get).not.toHaveBeenCalledWith(premiumSearchUrl)
 })

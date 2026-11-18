@@ -95,18 +95,40 @@ func modelManagementDB(t *testing.T, kind, dsn string) *gorm.DB {
 }
 
 func modelManagementRequest(t *testing.T, handler gin.HandlerFunc, method, path string, body any, output any) *httptest.ResponseRecorder {
+	return modelManagementRequestAsRole(t, handler, method, path, body, output, common.RoleRootUser)
+}
+
+func modelManagementRequestAsRole(t *testing.T, handler gin.HandlerFunc, method, path string, body any, output any, role int) *httptest.ResponseRecorder {
 	t.Helper()
 	encoded, err := common.Marshal(body)
 	require.NoError(t, err)
 	recorder := httptest.NewRecorder()
 	context, _ := gin.CreateTestContext(recorder)
 	context.Request = httptest.NewRequest(method, path, bytes.NewReader(encoded))
-	context.Set("role", common.RoleRootUser)
+	context.Set("role", role)
 	handler(context)
 	if output != nil {
 		require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), output), recorder.Body.String())
 	}
 	return recorder
+}
+
+func TestCreateModelMetaRequiresRootRole(t *testing.T) {
+	db := modelManagementDB(t, "sqlite", "")
+	metadata := &model.Model{ModelName: "root-created-model", Status: 1}
+
+	response := modelManagementRequestAsRole(t, CreateModelMeta, http.MethodPost, "/api/models/", metadata, nil, common.RoleAdminUser)
+	assert.Equal(t, http.StatusForbidden, response.Code)
+	assert.Contains(t, response.Body.String(), "AUTH_INSUFFICIENT_PRIVILEGE")
+
+	var count int64
+	require.NoError(t, db.Model(&model.Model{}).Where("model_name = ?", metadata.ModelName).Count(&count).Error)
+	assert.Zero(t, count)
+
+	response = modelManagementRequest(t, CreateModelMeta, http.MethodPost, "/api/models/", metadata, nil)
+	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+	require.NoError(t, db.Model(&model.Model{}).Where("model_name = ?", metadata.ModelName).Count(&count).Error)
+	assert.EqualValues(t, 1, count)
 }
 
 func TestModelPricingConversionDatabaseMatrix(t *testing.T) {
@@ -1012,6 +1034,14 @@ export function parseTaskResult() { return {}; }
 				}}
 				beforePricing, err := model.GetModelPricingSnapshot([]string{"matrix-priced"})
 				require.NoError(t, err)
+				adminResponse := modelManagementRequestAsRole(t, SyncUpstreamModels, "POST", "/api/models/sync_upstream", body, nil, common.RoleAdminUser)
+				assert.Equal(t, http.StatusForbidden, adminResponse.Code)
+				var countNew int64
+				require.NoError(t, db.Model(&model.Model{}).Where("model_name = ?", "matrix-new").Count(&countNew).Error)
+				assert.Zero(t, countNew)
+				var unchanged model.Model
+				require.NoError(t, db.Where("model_name = ?", "matrix-existing").First(&unchanged).Error)
+				assert.Equal(t, "Local description", unchanged.Description)
 				// A failed model insert must also undo the earlier metadata update
 				// and the newly inserted supplier.
 				require.NoError(t, db.Callback().Create().Before("gorm:create").Register("fail_metadata_matrix", func(tx *gorm.DB) {

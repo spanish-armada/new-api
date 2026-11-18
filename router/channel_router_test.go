@@ -60,6 +60,25 @@ func TestChannelStatusRoutesRegisterWithoutConflict(t *testing.T) {
 	})
 }
 
+func TestWholeInstanceChannelRoutesAreRootOnly(t *testing.T) {
+	for _, want := range []struct{ method, path string }{
+		{http.MethodGet, "/test"},
+		{http.MethodGet, "/update_balance"},
+		{http.MethodDelete, "/disabled"},
+		{http.MethodPost, "/fix"},
+		{http.MethodPost, "/upstream_updates/apply_all"},
+	} {
+		found := false
+		for _, route := range channelPermissionRoutes {
+			if route.method == want.method && route.path == want.path {
+				found = true
+				assert.True(t, route.rootOnly, "%s %s sweeps every channel, so it must be root-only", want.method, want.path)
+			}
+		}
+		assert.True(t, found, "route %s %s not found", want.method, want.path)
+	}
+}
+
 func assertChannelRoutePermission(t *testing.T, method string, path string, permission authz.Permission, handler any) {
 	t.Helper()
 	for _, route := range channelPermissionRoutes {

@@ -17,11 +17,19 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen, waitFor, within } from '@testing-library/react'
+import {
+  cleanup,
+  render,
+  screen,
+  waitFor,
+  within,
+} from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { api } from '@/lib/api'
+import { ROLE } from '@/lib/roles'
+import { useAuthStore } from '@/stores/auth-store'
 
 import { SyncWizardDialog } from '../components/dialogs/sync-wizard-dialog'
 import type { MetadataSyncCandidate, MetadataSyncPreview } from '../types'
@@ -62,7 +70,42 @@ const preview: MetadataSyncPreview = {
   ],
 }
 
+beforeEach(() => {
+  useAuthStore
+    .getState()
+    .auth.setUser({ id: 1, username: 'root', role: ROLE.SUPER_ADMIN })
+})
+
+afterEach(() => {
+  cleanup()
+  useAuthStore.getState().auth.reset()
+})
+
 describe('metadata sync preview', () => {
+  it('does not offer new model metadata to non-root users', async () => {
+    useAuthStore
+      .getState()
+      .auth.setUser({ id: 2, username: 'admin', role: ROLE.ADMIN })
+    vi.spyOn(api, 'get').mockResolvedValue({
+      data: { success: true, data: preview },
+    })
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    })
+    render(
+      <QueryClientProvider client={client}>
+        <SyncWizardDialog open onOpenChange={() => {}} />
+      </QueryClientProvider>
+    )
+    const user = userEvent.setup()
+    await user.click(
+      screen.getByRole('button', { name: 'Load metadata preview' })
+    )
+    expect(await screen.findByText('existing-model')).toBeVisible()
+    expect(screen.queryByText('new-model')).not.toBeInTheDocument()
+    client.clear()
+  })
+
   it('shows additions and field effects and writes only after explicit confirmation', async () => {
     vi.spyOn(api, 'get').mockResolvedValue({
       data: { success: true, data: preview },
