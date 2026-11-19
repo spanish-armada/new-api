@@ -92,9 +92,17 @@ if [[ "$NO_CACHE" == "1" ]]; then
   BUILD_ARGS=(--no-cache "${BUILD_ARGS[@]}")
 fi
 
-PROGRESS=${BUILD_PROGRESS:-plain}
-BUILD_ARGS=(--progress "$PROGRESS" "${BUILD_ARGS[@]}")
-log "building $IMAGE"
+# --progress belongs to buildx; the legacy builder rejects the flag outright.
+if $DOCKER buildx version >/dev/null 2>&1; then
+  BUILD_ARGS=(--progress "${BUILD_PROGRESS:-plain}" "${BUILD_ARGS[@]}")
+  BUILDER="buildx"
+else
+  BUILDER="legacy"
+fi
+log "building $IMAGE (builder: $BUILDER)"
+if [[ "$BUILDER" == "legacy" ]]; then
+  log "buildx is absent, so stage progress lines are not available; output is still streamed"
+fi
 log "cache: $([[ "$NO_CACHE" == "1" ]] && echo "disabled (--no-cache, expect several minutes)" || echo enabled)"
 log "live log: tail -f /tmp/new-api-build.log"
 if [[ -z "$BUN_REGISTRY" ]]; then
