@@ -14,6 +14,8 @@
 #   COMPOSE_SERVICE       compose service to recreate     (default new-api)
 #   HEALTH_PORT           port the container publishes    (default 3000)
 #   GOPROXY_ARG           Go module proxy for the build   (default https://goproxy.cn,direct)
+#   GOSUMDB_ARG           checksum database for the build (default sum.golang.google.cn;
+#                         sum.golang.org is unreachable from some networks)
 #   BUN_REGISTRY          npm registry mirror for the frontend build, empty keeps
 #                         the default registry (e.g. https://registry.npmmirror.com)
 #   FRONTEND_MARKER       string proving the embedded web console is current
@@ -26,6 +28,7 @@ readonly IMAGE=${IMAGE:-calciumion/new-api:latest}
 readonly COMPOSE_SERVICE=${COMPOSE_SERVICE:-new-api}
 readonly HEALTH_PORT=${HEALTH_PORT:-3000}
 readonly GOPROXY_ARG=${GOPROXY_ARG:-https://goproxy.cn,direct}
+readonly GOSUMDB_ARG=${GOSUMDB_ARG:-sum.golang.google.cn}
 readonly FRONTEND_MARKER=${FRONTEND_MARKER:-Copy sign-in link}
 readonly BUN_REGISTRY=${BUN_REGISTRY:-}
 readonly HEALTH_URL="http://127.0.0.1:${HEALTH_PORT}/api/status"
@@ -84,7 +87,7 @@ else
 fi
 
 # --- build -------------------------------------------------------------------
-BUILD_ARGS=(--pull --build-arg "GOPROXY=${GOPROXY_ARG}" -t "$IMAGE")
+BUILD_ARGS=(--pull --build-arg "GOPROXY=${GOPROXY_ARG}" --build-arg "GOSUMDB=${GOSUMDB_ARG}" -t "$IMAGE")
 if [[ -n "$BUN_REGISTRY" ]]; then
   BUILD_ARGS+=(--build-arg "BUN_CONFIG_REGISTRY=${BUN_REGISTRY}")
 fi

@@ -23,6 +23,7 @@ services:
       # slow here. Remove these to build with the upstream defaults.
       args:
         GOPROXY: https://goproxy.cn,direct
+        GOSUMDB: sum.golang.google.cn
         BUN_CONFIG_REGISTRY: https://registry.npmmirror.com
     image: calciumion/new-api:latest
     container_name: new-api

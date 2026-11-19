@@ -17,8 +17,15 @@ ENV GO111MODULE=on CGO_ENABLED=0 GOWORK=off
 
 ARG TARGETOS
 ARG TARGETARCH
+# Module proxy and checksum database. These are build arguments because the
+# defaults are unreachable from some networks; without the ARG declarations
+# Docker silently ignores --build-arg, and `go mod download` falls back to
+# proxy.golang.org and times out.
+ARG GOPROXY=https://proxy.golang.org,direct
+ARG GOSUMDB=sum.golang.org
 ENV GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH:-amd64}
 ENV GOEXPERIMENT=greenteagc
+ENV GOPROXY=${GOPROXY} GOSUMDB=${GOSUMDB}
 
 WORKDIR /build
 
