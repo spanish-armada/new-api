@@ -1,0 +1,302 @@
+{
+  "unixNow": 1766000000,
+  "cases": [
+    {
+      "name": "login start opens the claude.ai authorize page",
+      "hook": "login",
+      "args": [
+        {
+          "baseUrl": "https://api.anthropic.com",
+          "config": {},
+          "login": {
+            "state": "state-1",
+            "nonce": "nonce-1",
+            "codeVerifier": "verifier-1",
+            "codeChallenge": "challenge-1",
+            "codeChallengeMethod": "S256",
+            "redirectUri": "https://gw.example/oauth/plugin/claude-code/callback",
+            "session": null
+          }
+        },
+        null
+      ],
+      "expected": {
+        "type": "paste",
+        "url": "https://claude.com/cai/oauth/authorize?code=true&client_id=9d1c250a-e61b-44d9-88ed-5944d1962f5e&response_type=code&redirect_uri=https%3A%2F%2Fplatform.claude.com%2Foauth%2Fcode%2Fcallback&scope=org%3Acreate_api_key%20user%3Aprofile%20user%3Ainference%20user%3Asessions%3Aclaude_code%20user%3Amcp_servers%20user%3Afile_upload&code_challenge=challenge-1&code_challenge_method=S256&state=state-1",
+        "hint": {
+          "en": "To authorize on another device, copy the sign-in link shown above and open it there. After authorizing, copy the whole address of the page the browser lands on (it contains ?code=...) and paste it here.",
+          "zh": "需要在另一台设备上授权时，复制上方显示的登录链接，在那台设备上打开。授权后浏览器会停在展示验证码的页面，把地址栏中的完整地址（含有 ?code=...）粘贴到这里。"
+        }
+      }
+    },
+    {
+      "name": "convertRequest adds the Claude Code banner when system is absent",
+      "hook": "convertRequest",
+      "args": [
+        {
+          "baseUrl": "https://api.anthropic.com",
+          "path": "/v1/messages",
+          "config": {}
+        },
+        {
+          "body": {
+            "model": "client-model",
+            "max_tokens": 64,
+            "messages": [
+              {
+                "role": "user",
+                "content": "hi"
+              }
+            ]
+          },
+          "model": "upstream-model",
+          "stream": true
+        }
+      ],
+      "expected": {
+        "body": {
+          "model": "upstream-model",
+          "max_tokens": 64,
+          "messages": [
+            {
+              "role": "user",
+              "content": "hi"
+            }
+          ],
+          "system": [
+            {
+              "type": "text",
+              "text": "You are Claude Code, Anthropic's official CLI for Claude.",
+              "cache_control": {
+                "type": "ephemeral"
+              }
+            }
+          ]
+        },
+        "path": "/v1/messages?beta=true",
+        "stream": true,
+        "nativeResponse": true,
+        "headers": {
+          "anthropic-version": "2023-06-01",
+          "anthropic-beta": "claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14,fine-grained-tool-streaming-2025-05-14",
+          "user-agent": "claude-cli/2.1.81 (external, cli)",
+          "x-app": "cli"
+        }
+      }
+    },
+    {
+      "name": "convertRequest prefixes a plain string system prompt",
+      "hook": "convertRequest",
+      "args": [
+        {
+          "baseUrl": "https://api.anthropic.com",
+          "path": "/v1/messages",
+          "config": {}
+        },
+        {
+          "body": {
+            "model": "m",
+            "system": "You are helpful.",
+            "messages": []
+          },
+          "model": "m",
+          "stream": false
+        }
+      ],
+      "expected": {
+        "body": {
+          "model": "m",
+          "system": [
+            {
+              "type": "text",
+              "text": "You are Claude Code, Anthropic's official CLI for Claude.",
+              "cache_control": {
+                "type": "ephemeral"
+              }
+            },
+            {
+              "type": "text",
+              "text": "You are Claude Code, Anthropic's official CLI for Claude.\n\nYou are helpful."
+            }
+          ],
+          "messages": []
+        },
+        "path": "/v1/messages?beta=true",
+        "stream": false,
+        "nativeResponse": true,
+        "headers": {
+          "anthropic-version": "2023-06-01",
+          "anthropic-beta": "claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14,fine-grained-tool-streaming-2025-05-14",
+          "user-agent": "claude-cli/2.1.81 (external, cli)",
+          "x-app": "cli"
+        }
+      }
+    },
+    {
+      "name": "convertRequest leaves a Claude Code prompt untouched",
+      "hook": "convertRequest",
+      "args": [
+        {
+          "baseUrl": "https://api.anthropic.com",
+          "path": "/v1/messages",
+          "config": {}
+        },
+        {
+          "body": {
+            "model": "m",
+            "system": [
+              {
+                "type": "text",
+                "text": "You are Claude Code, Anthropic's official CLI for Claude. Go on.",
+                "cache_control": {
+                  "type": "ephemeral"
+                }
+              }
+            ],
+            "messages": []
+          },
+          "model": "m",
+          "stream": false
+        }
+      ],
+      "expected": {
+        "body": {
+          "model": "m",
+          "system": [
+            {
+              "type": "text",
+              "text": "You are Claude Code, Anthropic's official CLI for Claude. Go on.",
+              "cache_control": {
+                "type": "ephemeral"
+              }
+            }
+          ],
+          "messages": []
+        },
+        "path": "/v1/messages?beta=true",
+        "stream": false,
+        "nativeResponse": true,
+        "headers": {
+          "anthropic-version": "2023-06-01",
+          "anthropic-beta": "claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14,fine-grained-tool-streaming-2025-05-14",
+          "user-agent": "claude-cli/2.1.81 (external, cli)",
+          "x-app": "cli"
+        }
+      }
+    },
+    {
+      "name": "convertRequest rejects a body it cannot read",
+      "hook": "convertRequest",
+      "args": [
+        {
+          "baseUrl": "https://api.anthropic.com",
+          "path": "/v1/messages",
+          "config": {}
+        },
+        {
+          "body": "",
+          "model": "m",
+          "stream": false
+        }
+      ],
+      "expectedError": "JSON Anthropic Messages requests only"
+    },
+    {
+      "name": "convertRequest honours the channel config",
+      "hook": "convertRequest",
+      "args": [
+        {
+          "baseUrl": "https://api.anthropic.com",
+          "path": "/v1/messages",
+          "config": {
+            "clientVersion": "9.9.9",
+            "anthropicBeta": "custom-beta-1"
+          }
+        },
+        {
+          "body": {
+            "model": "m"
+          },
+          "model": "m",
+          "stream": false
+        }
+      ],
+      "expected": {
+        "body": {
+          "model": "m",
+          "system": [
+            {
+              "type": "text",
+              "text": "You are Claude Code, Anthropic's official CLI for Claude.",
+              "cache_control": {
+                "type": "ephemeral"
+              }
+            }
+          ]
+        },
+        "path": "/v1/messages?beta=true",
+        "stream": false,
+        "nativeResponse": true,
+        "headers": {
+          "anthropic-version": "2023-06-01",
+          "anthropic-beta": "custom-beta-1",
+          "user-agent": "claude-cli/9.9.9 (external, cli)",
+          "x-app": "cli"
+        }
+      }
+    },
+    {
+      "name": "convertResponse passes a vendor error through",
+      "hook": "convertResponse",
+      "args": [
+        {
+          "baseUrl": "https://api.anthropic.com",
+          "path": "/v1/messages",
+          "config": {}
+        },
+        {
+          "status": 400,
+          "headers": {
+            "Content-Type": "application/json"
+          },
+          "body": "{\"type\":\"error\",\"error\":{\"type\":\"invalid_request_error\",\"message\":\"bad\"}}"
+        }
+      ],
+      "expected": {
+        "body": "{\"type\":\"error\",\"error\":{\"type\":\"invalid_request_error\",\"message\":\"bad\"}}",
+        "contentType": "application/json"
+      }
+    },
+    {
+      "name": "convertResponse synthesizes an error for an empty body",
+      "hook": "convertResponse",
+      "args": [
+        {
+          "baseUrl": "https://api.anthropic.com",
+          "path": "/v1/messages",
+          "config": {}
+        },
+        {
+          "status": 529,
+          "headers": {},
+          "body": ""
+        }
+      ],
+      "expected": {
+        "body": {
+          "type": "error",
+          "error": {
+            "type": "api_error",
+            "message": "The vendor answered status 529 without a body."
+          }
+        }
+      }
+    },
+    {
+      "name": "convertStreamEvent is a no-op, unused with nativeResponse",
+      "hook": "convertStreamEvent",
+      "args": [],
+      "expected": {}
+    }
+  ]
+}
