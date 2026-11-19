@@ -22,8 +22,9 @@ whether to do it is the administrator's decision.
 1. Upload `plugin.js` on the task plugin page, or `POST /api/plugin/task`
    with `{"source": "...", "remark": "claude-code"}`. Switch the plugin on.
 2. Create a channel of type **Task Plugin**, bind **claude-code**, and leave
-   the key empty. The default Base URL is `https://api.anthropic.com`; change
-   it only when the account must reach the vendor through a proxy address.
+   the key empty. The channel Base URL can stay empty too: the plugin's
+   **Upstream API address** setting decides where requests go, and falls back
+   to the channel Base URL when it is empty.
 3. Fill the channel's model list with the models the account may serve.
 4. Press **login** on the channel. The browser opens claude.ai; after
    **Authorize** it lands on `platform.claude.com`, which shows the
@@ -89,10 +90,11 @@ whole point of the plugin.
 
 | Field | Default | Meaning |
 | --- | --- | --- |
+| `apiBaseUrl` | Empty, which means the channel Base URL | Address the Messages requests go to. Point it at a relay in front of Anthropic when the account cannot reach the vendor directly. |
 | `clientVersion` | `2.1.81` | Version in the `user-agent`. Raise it when the vendor requires a newer client. |
 | `anthropicBeta` | The Claude Code set | Comma separated `anthropic-beta` tokens. Empty keeps the default. |
 
-Both are per channel. Changing them takes effect on the next request; no
+All three are per channel. Changing them takes effect on the next request; no
 re-login is needed.
 
 ## Credential lifecycle

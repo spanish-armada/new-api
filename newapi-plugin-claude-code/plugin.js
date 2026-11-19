@@ -60,22 +60,19 @@ export const meta = {
     en: "Claude accounts logged in with claude.ai OAuth, relayed over the Anthropic Messages API",
     zh: "使用 claude.ai OAuth 登录的 Claude 账号，通过 Anthropic Messages 接口转发",
   },
-  version: "1.1.0",
+  version: "1.2.0",
   author: { name: "local" },
   baseUrl: "https://api.anthropic.com",
   allowedHosts: ["claude.com", "platform.claude.com"],
   models: [
-    "claude-opus-4-5-20251101",
-    "claude-sonnet-4-5-20250929",
-    "claude-haiku-4-5-20251001",
-    "claude-opus-4-1-20250805",
-    "claude-sonnet-4-20250514",
-    "claude-opus-4-20250514",
+    "claude-opus-4-6-速度刷",
   ],
   relay: [
     {
       incoming_path: "/v1/messages",
-      upstream_path: "/v1/messages",
+      // {config.apiBaseUrl} is the channel's upstream address; an empty value
+      // stands for the channel Base URL, so the plugin works either way.
+      upstream_path: "{config.apiBaseUrl}/v1/messages",
       converter: "plugin",
       auth: { type: "none" },
     },
@@ -83,6 +80,15 @@ export const meta = {
   channelConfig: {
     type: "object",
     properties: {
+      apiBaseUrl: {
+        type: "string",
+        format: "url",
+        title: { en: "Upstream API address", zh: "上游 API 地址" },
+        description: {
+          en: "Address the Messages requests go to; use a relay in front of Anthropic when the account must not reach it directly. Empty uses the channel Base URL",
+          zh: "Messages 请求发往的地址；账号无法直连 Anthropic 时在这里填中转地址。留空则使用渠道的 Base URL",
+        },
+      },
       clientVersion: {
         type: "string",
         title: { en: "Claude CLI version", zh: "Claude CLI 版本" },

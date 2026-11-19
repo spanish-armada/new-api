@@ -13,7 +13,7 @@ New API 把拿到的 OAuth 凭据保存在渠道的密钥行里，在过期前�
 ## 渠道设置
 
 1. 在任务插件页上传 `plugin.js`，或 `POST /api/plugin/task` 提交 `{"source": "...", "remark": "claude-code"}`，然后启用插件。
-2. 新建类型为 **Task Plugin** 的渠道，绑定 **claude-code**，密钥留空。默认 Base URL 是 `https://api.anthropic.com`；只有在账号必须经代理地址访问上游时才需要改。
+2. 新建类型为 **Task Plugin** 的渠道，绑定 **claude-code**，密钥留空，渠道 Base URL 也可以留空：实际发往哪里由插件配置里的 **上游 API 地址** 决定，留空则使用渠道的 Base URL。
 3. 在渠道的模型列表里填入该账号可服务的模型。
 4. 在渠道上点击 **登录**。浏览器打开 claude.ai，点 **Authorize** 后会停在 `platform.claude.com` 的验证码页面。复制地址栏中的完整地址（含有 `?code=...&state=...`）粘贴到对话框。
 5. 测试渠道，然后启用。
@@ -66,10 +66,11 @@ claude.ai 订阅令牌只有在请求同时携带 Claude Code 的 beta 集合、
 
 | 字段 | 默认值 | 说明 |
 | --- | --- | --- |
+| `apiBaseUrl` | 留空，即使用渠道 Base URL | Messages 请求发往的地址。账号无法直连厂商时填放在 Anthropic 前面的中转地址。 |
 | `clientVersion` | `2.1.81` | `user-agent` 中的版本号。厂商要求更新客户端时上调。 |
 | `anthropicBeta` | Claude Code 默认集合 | 逗号分隔的 `anthropic-beta` 名称。留空则使用默认集合。 |
 
-两项都是按渠道生效，修改后下一个请求即时生效，无需重新登录。
+三项都是按渠道生效，修改后下一个请求即时生效，无需重新登录。
 
 ## 凭据生命周期
 
