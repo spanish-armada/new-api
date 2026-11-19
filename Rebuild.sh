@@ -14,6 +14,8 @@
 #   COMPOSE_SERVICE       compose service to recreate     (default new-api)
 #   HEALTH_PORT           port the container publishes    (default 3000)
 #   GOPROXY_ARG           Go module proxy for the build   (default https://goproxy.cn,direct)
+#   BUN_REGISTRY          npm registry mirror for the frontend build, empty keeps
+#                         the default registry (e.g. https://registry.npmmirror.com)
 #   FRONTEND_MARKER       string proving the embedded web console is current
 #                         (default "Copy sign-in link")
 
@@ -25,6 +27,7 @@ readonly COMPOSE_SERVICE=${COMPOSE_SERVICE:-new-api}
 readonly HEALTH_PORT=${HEALTH_PORT:-3000}
 readonly GOPROXY_ARG=${GOPROXY_ARG:-https://goproxy.cn,direct}
 readonly FRONTEND_MARKER=${FRONTEND_MARKER:-Copy sign-in link}
+readonly BUN_REGISTRY=${BUN_REGISTRY:-}
 readonly HEALTH_URL="http://127.0.0.1:${HEALTH_PORT}/api/status"
 readonly HEALTH_TIMEOUT=${HEALTH_TIMEOUT:-120}
 
@@ -82,6 +85,9 @@ fi
 
 # --- build -------------------------------------------------------------------
 BUILD_ARGS=(--pull --build-arg "GOPROXY=${GOPROXY_ARG}" -t "$IMAGE")
+if [[ -n "$BUN_REGISTRY" ]]; then
+  BUILD_ARGS+=(--build-arg "BUN_CONFIG_REGISTRY=${BUN_REGISTRY}")
+fi
 if [[ "$NO_CACHE" == "1" ]]; then
   BUILD_ARGS=(--no-cache "${BUILD_ARGS[@]}")
 fi
@@ -91,11 +97,19 @@ BUILD_ARGS=(--progress "$PROGRESS" "${BUILD_ARGS[@]}")
 log "building $IMAGE"
 log "cache: $([[ "$NO_CACHE" == "1" ]] && echo "disabled (--no-cache, expect several minutes)" || echo enabled)"
 log "live log: tail -f /tmp/new-api-build.log"
+if [[ -z "$BUN_REGISTRY" ]]; then
+  log "npm registry: default; BUN_REGISTRY=https://registry.npmmirror.com speeds up a slow network"
+fi
 set +e
 # Stream every line: piping through tail would hide the whole build until it ends.
 $DOCKER build "${BUILD_ARGS[@]}" . 2>&1 | tee /tmp/new-api-build.log
 BUILD_STATUS=${PIPESTATUS[0]}
 set -e
+if [[ "$BUILD_STATUS" -eq 130 || "$BUILD_STATUS" -eq 143 ]]; then
+  log "build interrupted; the running container was not touched"
+  log "resume with a cached build: sudo ./Rebuild.sh"
+  exit 130
+fi
 if [[ "$BUILD_STATUS" -ne 0 ]]; then
   die "docker build failed; the container was not touched (full log: /tmp/new-api-build.log)"
 fi
