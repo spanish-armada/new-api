@@ -131,10 +131,9 @@ export function RedirectStep(props: { url: string }) {
     <div className='flex flex-col gap-4'>
       <p className='text-sm'>
         {t(
-          'Sign in on the provider page in a new tab. This dialog updates when you finish.'
+          'Open the sign-in link below in a browser to sign in. This dialog updates when you finish.'
         )}
       </p>
-      <VendorLink url={props.url} label={t('Open sign-in page')} />
       <SignInLink url={props.url} />
       <LoadingState inline size='sm' message={t('Waiting for sign-in...')} />
     </div>
@@ -163,9 +162,8 @@ export function PasteStep(props: {
     <div className='flex flex-col gap-4'>
       <ol className='list-decimal space-y-3 ps-5 text-sm'>
         <li>
-          {t('Open the sign-in page and sign in.')}
-          <div className='mt-2 flex flex-col gap-2'>
-            <VendorLink url={props.url} label={t('Open sign-in page')} />
+          {t('Open the sign-in link below in a browser and sign in.')}
+          <div className='mt-2'>
             <SignInLink url={props.url} />
           </div>
         </li>

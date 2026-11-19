@@ -3296,7 +3296,7 @@ test('a login plugin saves without a key, then logs in on the new channel', asyn
   const payload = post.mock.calls[0]?.[1] as { channel: { setting: string } }
   expect(JSON.parse(payload.channel.setting).task_plugin_key).toBe('acct')
   expect(
-    await within(dialog).findByRole('link', { name: 'Open sign-in page' })
+    await within(dialog).findByRole('button', { name: 'Copy sign-in link' })
   ).toBeVisible()
   expect(post).toHaveBeenNthCalledWith(
     2,

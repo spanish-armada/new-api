@@ -220,10 +220,10 @@ test('the paste step sends the trimmed address and retries a failed attempt', as
   expect(
     await within(dialog).findByText('Use the account that owns the plan.')
   ).toBeVisible()
+  // The step offers the address itself for another browser, not a new tab here.
   expect(
-    within(dialog).getByRole('link', { name: 'Open sign-in page' })
-  ).toHaveAttribute('href', 'https://vendor.example/authorize?state=s')
-  // The same address is shown so it can be read and copied elsewhere.
+    within(dialog).queryByRole('link', { name: 'Open sign-in page' })
+  ).not.toBeInTheDocument()
   expect(
     within(dialog).getByText('https://vendor.example/authorize?state=s')
   ).toBeVisible()
@@ -311,14 +311,14 @@ test('the redirect step finishes when the callback tab reports this channel', as
   renderDialog({ onDone })
   const dialog = await screen.findByRole('dialog')
   expect(
-    await within(dialog).findByRole('link', { name: 'Open sign-in page' })
-  ).toHaveAttribute('target', '_blank')
+    await within(dialog).findByRole('button', { name: 'Copy sign-in link' })
+  ).toBeEnabled()
+  expect(
+    within(dialog).queryByRole('link', { name: 'Open sign-in page' })
+  ).not.toBeInTheDocument()
   expect(
     within(dialog).getByText('https://vendor.example/authorize')
   ).toBeVisible()
-  expect(
-    within(dialog).getByRole('button', { name: 'Copy sign-in link' })
-  ).toBeEnabled()
   expect(within(dialog).getByText('Waiting for sign-in...')).toBeVisible()
 
   const sender = new BroadcastChannel(PLUGIN_LOGIN_BROADCAST_CHANNEL)
