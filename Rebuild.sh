@@ -86,9 +86,14 @@ if [[ "$NO_CACHE" == "1" ]]; then
   BUILD_ARGS=(--no-cache "${BUILD_ARGS[@]}")
 fi
 
+PROGRESS=${BUILD_PROGRESS:-plain}
+BUILD_ARGS=(--progress "$PROGRESS" "${BUILD_ARGS[@]}")
 log "building $IMAGE"
+log "cache: $([[ "$NO_CACHE" == "1" ]] && echo "disabled (--no-cache, expect several minutes)" || echo enabled)"
+log "live log: tail -f /tmp/new-api-build.log"
 set +e
-$DOCKER build "${BUILD_ARGS[@]}" . 2>&1 | tee /tmp/new-api-build.log | tail -40
+# Stream every line: piping through tail would hide the whole build until it ends.
+$DOCKER build "${BUILD_ARGS[@]}" . 2>&1 | tee /tmp/new-api-build.log
 BUILD_STATUS=${PIPESTATUS[0]}
 set -e
 if [[ "$BUILD_STATUS" -ne 0 ]]; then
