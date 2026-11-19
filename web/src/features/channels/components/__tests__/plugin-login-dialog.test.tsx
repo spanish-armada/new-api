@@ -224,12 +224,18 @@ test('the paste step sends the trimmed address and retries a failed attempt', as
   expect(
     within(dialog).queryByRole('link', { name: 'Open sign-in page' })
   ).not.toBeInTheDocument()
-  expect(
-    within(dialog).getByText('https://vendor.example/authorize?state=s')
-  ).toBeVisible()
-  expect(
-    within(dialog).getByRole('button', { name: 'Copy sign-in link' })
-  ).toBeEnabled()
+  const signInAddress = within(dialog).getByText(
+    'https://vendor.example/authorize?state=s'
+  )
+  expect(signInAddress).toBeVisible()
+  const copy = within(dialog).getByRole('button', {
+    name: 'Copy sign-in link',
+  })
+  expect(copy).toBeEnabled()
+  // The copy action is laid out above the address box it copies.
+  expect(copy.compareDocumentPosition(signInAddress)).toBe(
+    Node.DOCUMENT_POSITION_FOLLOWING
+  )
 
   // Without a redirect_uri the step names no address and shows no example.
   const address = within(dialog).getByRole('textbox', {
@@ -310,15 +316,18 @@ test('the redirect step finishes when the callback tab reports this channel', as
   const onDone = vi.fn()
   renderDialog({ onDone })
   const dialog = await screen.findByRole('dialog')
-  expect(
-    await within(dialog).findByRole('button', { name: 'Copy sign-in link' })
-  ).toBeEnabled()
+  const copy = await within(dialog).findByRole('button', {
+    name: 'Copy sign-in link',
+  })
+  expect(copy).toBeEnabled()
   expect(
     within(dialog).queryByRole('link', { name: 'Open sign-in page' })
   ).not.toBeInTheDocument()
-  expect(
-    within(dialog).getByText('https://vendor.example/authorize')
-  ).toBeVisible()
+  const address = within(dialog).getByText('https://vendor.example/authorize')
+  expect(address).toBeVisible()
+  expect(copy.compareDocumentPosition(address)).toBe(
+    Node.DOCUMENT_POSITION_FOLLOWING
+  )
   expect(within(dialog).getByText('Waiting for sign-in...')).toBeVisible()
 
   const sender = new BroadcastChannel(PLUGIN_LOGIN_BROADCAST_CHANNEL)

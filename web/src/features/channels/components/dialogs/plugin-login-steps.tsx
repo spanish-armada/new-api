@@ -69,16 +69,14 @@ function VendorLink(props: { url: string; label: string }) {
 
 /**
  * The sign-in address itself, shown readably and copyable for another browser,
- * device or profile. A paste flow depends on opening this exact address there.
+ * device or profile. The copy action sits above the address box so it is the
+ * first thing read, and a paste flow depends on opening this exact address.
  */
 function SignInLink(props: { url: string }) {
   const { t } = useTranslation()
   if (!isHttpUrl(props.url)) return null
   return (
-    <div className='bg-muted/40 flex flex-wrap items-center justify-between gap-2 rounded-lg border px-3 py-2'>
-      <code className='min-w-0 flex-1 font-mono text-xs break-all select-all'>
-        {props.url}
-      </code>
+    <div className='flex flex-col items-start gap-2'>
       <CopyButton
         value={props.url}
         variant='outline'
@@ -87,6 +85,11 @@ function SignInLink(props: { url: string }) {
       >
         {t('Copy sign-in link')}
       </CopyButton>
+      <div className='bg-muted/40 w-full rounded-lg border px-3 py-2'>
+        <code className='block font-mono text-xs break-all select-all'>
+          {props.url}
+        </code>
+      </div>
     </div>
   )
 }
