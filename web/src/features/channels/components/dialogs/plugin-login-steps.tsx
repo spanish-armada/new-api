@@ -67,6 +67,30 @@ function VendorLink(props: { url: string; label: string }) {
   )
 }
 
+/**
+ * The sign-in address itself, shown readably and copyable for another browser,
+ * device or profile. A paste flow depends on opening this exact address there.
+ */
+function SignInLink(props: { url: string }) {
+  const { t } = useTranslation()
+  if (!isHttpUrl(props.url)) return null
+  return (
+    <div className='bg-muted/40 flex flex-wrap items-center justify-between gap-2 rounded-lg border px-3 py-2'>
+      <code className='min-w-0 flex-1 font-mono text-xs break-all select-all'>
+        {props.url}
+      </code>
+      <CopyButton
+        value={props.url}
+        variant='outline'
+        size='sm'
+        aria-label={t('Copy sign-in link')}
+      >
+        {t('Copy sign-in link')}
+      </CopyButton>
+    </div>
+  )
+}
+
 /** The account and expiry of a credential that finished logging in. */
 export function PluginCredentialDetails(props: {
   credential?: PluginCredentialSummary
@@ -111,6 +135,7 @@ export function RedirectStep(props: { url: string }) {
         )}
       </p>
       <VendorLink url={props.url} label={t('Open sign-in page')} />
+      <SignInLink url={props.url} />
       <LoadingState inline size='sm' message={t('Waiting for sign-in...')} />
     </div>
   )
@@ -139,8 +164,9 @@ export function PasteStep(props: {
       <ol className='list-decimal space-y-3 ps-5 text-sm'>
         <li>
           {t('Open the sign-in page and sign in.')}
-          <div className='mt-2'>
+          <div className='mt-2 flex flex-col gap-2'>
             <VendorLink url={props.url} label={t('Open sign-in page')} />
+            <SignInLink url={props.url} />
           </div>
         </li>
         <li>

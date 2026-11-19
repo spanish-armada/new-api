@@ -223,6 +223,13 @@ test('the paste step sends the trimmed address and retries a failed attempt', as
   expect(
     within(dialog).getByRole('link', { name: 'Open sign-in page' })
   ).toHaveAttribute('href', 'https://vendor.example/authorize?state=s')
+  // The same address is shown so it can be read and copied elsewhere.
+  expect(
+    within(dialog).getByText('https://vendor.example/authorize?state=s')
+  ).toBeVisible()
+  expect(
+    within(dialog).getByRole('button', { name: 'Copy sign-in link' })
+  ).toBeEnabled()
 
   // Without a redirect_uri the step names no address and shows no example.
   const address = within(dialog).getByRole('textbox', {
@@ -306,6 +313,12 @@ test('the redirect step finishes when the callback tab reports this channel', as
   expect(
     await within(dialog).findByRole('link', { name: 'Open sign-in page' })
   ).toHaveAttribute('target', '_blank')
+  expect(
+    within(dialog).getByText('https://vendor.example/authorize')
+  ).toBeVisible()
+  expect(
+    within(dialog).getByRole('button', { name: 'Copy sign-in link' })
+  ).toBeEnabled()
   expect(within(dialog).getByText('Waiting for sign-in...')).toBeVisible()
 
   const sender = new BroadcastChannel(PLUGIN_LOGIN_BROADCAST_CHANNEL)
