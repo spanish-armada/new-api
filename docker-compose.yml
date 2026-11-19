@@ -16,6 +16,14 @@ version: '3.4' # For compatibility with older Docker versions
 
 services:
   new-api:
+    build:
+      context: .
+      # Local build arguments for this deployment: the Dockerfile defaults to
+      # proxy.golang.org, which this host cannot reach, and the npm registry is
+      # slow here. Remove these to build with the upstream defaults.
+      args:
+        GOPROXY: https://goproxy.cn,direct
+        BUN_CONFIG_REGISTRY: https://registry.npmmirror.com
     image: calciumion/new-api:latest
     container_name: new-api
     restart: always
