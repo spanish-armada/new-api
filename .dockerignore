@@ -5,6 +5,8 @@
 .gitignore
 Makefile
 docs
+data
+logs
 .eslintcache
 .gocache
 /web/node_modules

@@ -2,6 +2,7 @@ package controller
 
 import (
 	"bytes"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -85,14 +86,25 @@ func TestChannelHasSensitiveChanges(t *testing.T) {
 	t.Run("read-only fields are ignored by sensitivity check", func(t *testing.T) {
 		updated := PatchChannel{Channel: *origin}
 		updated.Balance = 99
-		updated.UsedQuota = 100
 		updated.ResponseTime = 200
 
 		assert.False(t, channelHasSensitiveChanges(&updated, origin, map[string]any{
 			"balance":       updated.Balance,
-			"used_quota":    updated.UsedQuota,
 			"response_time": updated.ResponseTime,
 		}))
+	})
+
+	t.Run("used quota change is sensitive", func(t *testing.T) {
+		updated := PatchChannel{Channel: *origin}
+		updated.UsedQuota = origin.UsedQuota + 1
+
+		assert.True(t, channelHasSensitiveChanges(&updated, origin, map[string]any{
+			"used_quota": updated.UsedQuota,
+		}))
+		updated.UsedQuota = origin.UsedQuota
+		assert.True(t, channelHasSensitiveChanges(&updated, origin, map[string]any{
+			"used_quota": updated.UsedQuota,
+		}), "an explicit quota update must be authorized even when its value is unchanged")
 	})
 }
 
@@ -114,7 +126,6 @@ func TestClearChannelReadOnlyFields(t *testing.T) {
 		"response_time":        channel.ResponseTime,
 		"balance":              channel.Balance,
 		"balance_updated_time": channel.BalanceUpdatedTime,
-		"used_quota":           channel.UsedQuota,
 		"models":               channel.Models,
 		"group":                channel.Group,
 	})
@@ -124,7 +135,7 @@ func TestClearChannelReadOnlyFields(t *testing.T) {
 	assert.Zero(t, channel.ResponseTime)
 	assert.Zero(t, channel.Balance)
 	assert.Zero(t, channel.BalanceUpdatedTime)
-	assert.Zero(t, channel.UsedQuota)
+	assert.Equal(t, int64(66), channel.UsedQuota)
 	assert.Equal(t, "gpt-4o", channel.Models)
 	assert.Equal(t, "default", channel.Group)
 }
@@ -149,6 +160,48 @@ func TestUpdateChannelRejectsStatusField(t *testing.T) {
 	}
 	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
 	assert.False(t, response.Success)
+}
+
+func TestUpdateChannelCanSetUsedQuota(t *testing.T) {
+	setupTaskPluginBindChannelTest(t)
+	channel := model.Channel{
+		Name:      "quota-update",
+		Key:       "test-key",
+		Status:    common.ChannelStatusEnabled,
+		Models:    "gpt-4o",
+		Group:     "default",
+		UsedQuota: 50,
+	}
+	require.NoError(t, channel.Insert())
+
+	update := func(fields string) channelAPIResponse {
+		response, raw := callChannelAPI(t, UpdateChannel, http.MethodPut, "/api/channel",
+			fmt.Sprintf(`{"id":%d,"name":"quota-update"%s}`, channel.Id, fields))
+		require.True(t, response.Success, raw)
+		return response
+	}
+	response := update(`,"used_quota":125`)
+	var returned model.Channel
+	require.NoError(t, common.Unmarshal(response.Data, &returned))
+	assert.Equal(t, int64(125), returned.UsedQuota)
+
+	var stored model.Channel
+	require.NoError(t, model.DB.Select("used_quota").First(&stored, channel.Id).Error)
+	assert.Equal(t, int64(125), stored.UsedQuota)
+
+	update(`,"used_quota":0`)
+	require.NoError(t, model.DB.Select("used_quota").First(&stored, channel.Id).Error)
+	assert.Zero(t, stored.UsedQuota)
+
+	response, raw := callChannelAPI(t, UpdateChannel, http.MethodPut, "/api/channel",
+		fmt.Sprintf(`{"id":%d,"name":"quota-update","used_quota":-1}`, channel.Id))
+	assert.False(t, response.Success, raw)
+	require.NoError(t, model.DB.Select("used_quota").First(&stored, channel.Id).Error)
+	assert.Zero(t, stored.UsedQuota)
+
+	update("")
+	require.NoError(t, model.DB.Select("used_quota").First(&stored, channel.Id).Error)
+	assert.Zero(t, stored.UsedQuota, "omitting used_quota must preserve its stored value")
 }
 
 func TestChannelStatusValidation(t *testing.T) {

@@ -176,9 +176,87 @@ func applyChannelStatusFilter(query *gorm.DB, statusFilter int) *gorm.DB {
 	return query
 }
 
-func buildChannelListQuery(group string, statusFilter int, typeFilter int) *gorm.DB {
+func channelGroupScope(c *gin.Context, requestedGroup string) (string, bool) {
+	if c.GetInt("role") == common.RoleRootUser {
+		return model.NormalizeChannelGroupFilter(requestedGroup), true
+	}
+	group := strings.TrimSpace(c.GetString("group"))
+	return group, group != ""
+}
+
+// callerCanUseChannel reports whether the caller may read or mutate the channel.
+// Root reaches every channel; an administrator reaches only the channels of the
+// group on their own account.
+func callerCanUseChannel(c *gin.Context, channel *model.Channel) bool {
+	if c.GetInt("role") == common.RoleRootUser {
+		return true
+	}
+	return model.ChannelInGroup(channel, c.GetString("group"))
+}
+
+// requireChannelAccess stops the request with 404 when the caller cannot use the
+// channel; the same answer as a missing channel avoids id enumeration.
+func requireChannelAccess(c *gin.Context, channel *model.Channel) bool {
+	if callerCanUseChannel(c, channel) {
+		return true
+	}
+	common.ApiErrorStatus(c, http.StatusNotFound, common.NewMessage("Channel does not exist"))
+	return false
+}
+
+// requireChannelsAccess checks every id in one query and stops the request when
+// any of them is outside the caller's group.
+func requireChannelsAccess(c *gin.Context, ids []int) bool {
+	if c.GetInt("role") == common.RoleRootUser {
+		return true
+	}
+	allowed := int64(0)
+	if err := model.ApplyChannelGroupFilter(model.DB.Model(&model.Channel{}).Where("id IN ?", ids), c.GetString("group")).
+		Distinct("id").Count(&allowed).Error; err != nil {
+		common.SysError(common.LogText("failed to resolve channel group scope: %s", err.Error()))
+		common.ApiErrorStatus(c, http.StatusInternalServerError, common.NewMessage("Failed to load the channels. Please try again later"))
+		return false
+	}
+	if allowed != int64(len(slices.Compact(append([]int(nil), ids...)))) {
+		common.ApiErrorStatus(c, http.StatusNotFound, common.NewMessage("Channel does not exist"))
+		return false
+	}
+	return true
+}
+
+// requireTagAccess stops tag-wide operations unless every channel carrying the
+// tag belongs to the caller's group. Root may operate on any tag.
+func requireTagAccess(c *gin.Context, tag string) bool {
+	if c.GetInt("role") == common.RoleRootUser {
+		return true
+	}
+	var total, inGroup int64
+	if err := model.DB.Model(&model.Channel{}).Where("tag = ?", tag).Count(&total).Error; err != nil {
+		common.SysError(common.LogText("failed to count tag channels: %s", err.Error()))
+		common.ApiErrorStatus(c, http.StatusInternalServerError, common.NewMessage("Failed to load the channels. Please try again later"))
+		return false
+	}
+	err := model.ApplyChannelGroupFilter(model.DB.Model(&model.Channel{}).Where("tag = ?", tag), c.GetString("group")).
+		Count(&inGroup).Error
+	if err != nil {
+		common.SysError(common.LogText("failed to resolve tag group scope: %s", err.Error()))
+		common.ApiErrorStatus(c, http.StatusInternalServerError, common.NewMessage("Failed to load the channels. Please try again later"))
+		return false
+	}
+	if total == 0 || inGroup != total {
+		common.ApiErrorStatus(c, http.StatusNotFound, common.NewMessage("Channel does not exist"))
+		return false
+	}
+	return true
+}
+
+func buildChannelListQuery(group string, hasGroup bool, statusFilter int, typeFilter int) *gorm.DB {
 	query := model.DB.Model(&model.Channel{})
-	query = model.ApplyChannelGroupFilter(query, group)
+	if !hasGroup {
+		query = query.Where("1 = 0")
+	} else {
+		query = model.ApplyChannelGroupFilter(query, group)
+	}
 	query = applyChannelStatusFilter(query, statusFilter)
 	if typeFilter >= 0 {
 		query = query.Where("type = ?", typeFilter)
@@ -225,7 +303,7 @@ func GetAllChannels(c *gin.Context) {
 	idSort, _ := strconv.ParseBool(c.Query("id_sort"))
 	sortOptions := model.NewChannelSortOptions(c.Query("sort_by"), c.Query("sort_order"), idSort)
 	enableTagMode, _ := strconv.ParseBool(c.Query("tag_mode"))
-	groupFilter := model.NormalizeChannelGroupFilter(c.Query("group"))
+	groupFilter, hasGroup := channelGroupScope(c, c.Query("group"))
 	statusParam := c.Query("status")
 	// statusFilter: -1 all, 1 enabled, 0 disabled (include auto & manual)
 	statusFilter := parseStatusFilter(statusParam)
@@ -241,13 +319,13 @@ func GetAllChannels(c *gin.Context) {
 	var total int64
 
 	if enableTagMode {
-		tags, err := model.GetPaginatedChannelTags(buildChannelListQuery(groupFilter, statusFilter, typeFilter), pageInfo.GetStartIdx(), pageInfo.GetPageSize())
+		tags, err := model.GetPaginatedChannelTags(buildChannelListQuery(groupFilter, hasGroup, statusFilter, typeFilter), pageInfo.GetStartIdx(), pageInfo.GetPageSize())
 		if err != nil {
 			common.SysError(common.LogText("failed to get paginated tags: %s", err.Error()))
 			common.ApiErrorT(c, "Failed to fetch tags. Please try again later")
 			return
 		}
-		total, err = model.CountChannelTags(buildChannelListQuery(groupFilter, statusFilter, typeFilter))
+		total, err = model.CountChannelTags(buildChannelListQuery(groupFilter, hasGroup, statusFilter, typeFilter))
 		if err != nil {
 			common.SysError(common.LogText("failed to count tags: %s", err.Error()))
 			common.ApiErrorT(c, "Failed to count tags. Please try again later")
@@ -258,7 +336,7 @@ func GetAllChannels(c *gin.Context) {
 				continue
 			}
 			var tagChannels []*model.Channel
-			err := sortOptions.Apply(buildChannelListQuery(groupFilter, statusFilter, typeFilter).Where("tag = ?", *tag)).
+			err := sortOptions.Apply(buildChannelListQuery(groupFilter, hasGroup, statusFilter, typeFilter).Where("tag = ?", *tag)).
 				Omit("key").
 				Find(&tagChannels).Error
 			if err != nil {
@@ -269,13 +347,13 @@ func GetAllChannels(c *gin.Context) {
 			channelData = append(channelData, tagChannels...)
 		}
 	} else {
-		if err := buildChannelListQuery(groupFilter, statusFilter, typeFilter).Count(&total).Error; err != nil {
+		if err := buildChannelListQuery(groupFilter, hasGroup, statusFilter, typeFilter).Count(&total).Error; err != nil {
 			common.SysError(common.LogText("failed to count channels: %s", err.Error()))
 			common.ApiErrorT(c, "Failed to count channels. Please try again later")
 			return
 		}
 
-		err := sortOptions.Apply(buildChannelListQuery(groupFilter, statusFilter, typeFilter)).
+		err := sortOptions.Apply(buildChannelListQuery(groupFilter, hasGroup, statusFilter, typeFilter)).
 			Limit(pageInfo.GetPageSize()).
 			Offset(pageInfo.GetStartIdx()).
 			Omit("key").
@@ -291,7 +369,7 @@ func GetAllChannels(c *gin.Context) {
 		clearChannelInfo(datum)
 	}
 
-	countQuery := buildChannelListQuery(groupFilter, statusFilter, -1)
+	countQuery := buildChannelListQuery(groupFilter, hasGroup, statusFilter, -1)
 	var results []struct {
 		Type  int64
 		Count int64
@@ -393,7 +471,7 @@ func FixChannelsAbilities(c *gin.Context) {
 
 func SearchChannels(c *gin.Context) {
 	keyword := c.Query("keyword")
-	group := c.Query("group")
+	group, hasGroup := channelGroupScope(c, c.Query("group"))
 	modelKeyword := c.Query("model")
 	statusParam := c.Query("status")
 	statusFilter := parseStatusFilter(statusParam)
@@ -401,7 +479,9 @@ func SearchChannels(c *gin.Context) {
 	sortOptions := model.NewChannelSortOptions(c.Query("sort_by"), c.Query("sort_order"), idSort)
 	enableTagMode, _ := strconv.ParseBool(c.Query("tag_mode"))
 	channelData := make([]*model.Channel, 0)
-	if enableTagMode {
+	if !hasGroup {
+		channelData = []*model.Channel{}
+	} else if enableTagMode {
 		tags, err := model.SearchTags(keyword, group, modelKeyword, idSort)
 		if err != nil {
 			common.ApiError(c, err)
@@ -410,7 +490,7 @@ func SearchChannels(c *gin.Context) {
 		for _, tag := range tags {
 			if tag != nil && *tag != "" {
 				var tagChannels []*model.Channel
-				err := sortOptions.Apply(buildChannelListQuery(group, -1, -1).Where("tag = ?", *tag)).
+				err := sortOptions.Apply(buildChannelListQuery(group, hasGroup, -1, -1).Where("tag = ?", *tag)).
 					Omit("key").
 					Find(&tagChannels).Error
 				if err != nil {
@@ -504,18 +584,30 @@ func GetChannel(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
-	channel, err := model.GetChannelById(id, false)
+	query := model.DB.Where("id = ?", id)
+	if c.GetInt("role") != common.RoleRootUser {
+		group := strings.TrimSpace(c.GetString("group"))
+		if group == "" {
+			common.ApiErrorStatus(c, http.StatusNotFound, common.NewMessage("Channel does not exist"))
+			return
+		}
+		query = model.ApplyChannelGroupFilter(query, group)
+	}
+	var channel model.Channel
+	err = query.Omit("key").First(&channel).Error
 	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			common.ApiErrorStatus(c, http.StatusNotFound, common.NewMessage("Channel does not exist"))
+			return
+		}
 		common.ApiError(c, err)
 		return
 	}
-	if channel != nil {
-		clearChannelInfo(channel)
-	}
+	clearChannelInfo(&channel)
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "",
-		"data":    channel,
+		"data":    &channel,
 	})
 	return
 }
@@ -847,6 +939,18 @@ func AddChannel(c *gin.Context) {
 		return
 	}
 
+	if c.GetInt("role") != common.RoleRootUser {
+		// A non-root administrator creates channels in their own group; a
+		// channel placed anywhere else would be outside their scope and would
+		// let them provision capacity for another tenant.
+		group := strings.TrimSpace(c.GetString("group"))
+		if group == "" {
+			common.ApiErrorStatus(c, http.StatusForbidden, common.NewMessage("Unauthorized, insufficient privileges"))
+			return
+		}
+		addChannelRequest.Channel.Group = group
+	}
+
 	// A channel of a plugin that logs in may start without a key and wait for
 	// a login; batch mode makes one channel per key, so it still needs keys.
 	keyless := strings.TrimSpace(addChannelRequest.Channel.Key) == "" && service.ChannelSupportsPluginLogin(addChannelRequest.Channel)
@@ -1063,6 +1167,9 @@ func DisableTagChannels(c *gin.Context) {
 		common.ApiErrorT(c, "Invalid parameters")
 		return
 	}
+	if !requireTagAccess(c, channelTag.Tag) {
+		return
+	}
 	channels, err := model.GetChannelsByTag(channelTag.Tag, false, false)
 	if err != nil {
 		common.ApiError(c, err)
@@ -1093,6 +1200,9 @@ func EnableTagChannels(c *gin.Context) {
 		common.ApiErrorT(c, "Invalid parameters")
 		return
 	}
+	if !requireTagAccess(c, channelTag.Tag) {
+		return
+	}
 	err = model.EnableChannelByTag(channelTag.Tag)
 	if err != nil {
 		common.ApiError(c, err)
@@ -1118,6 +1228,9 @@ func EditTagChannels(c *gin.Context) {
 	}
 	if channelTag.Tag == "" {
 		common.ApiErrorT(c, "Tag cannot be empty")
+		return
+	}
+	if !requireTagAccess(c, channelTag.Tag) {
 		return
 	}
 	if (channelTag.ParamOverride != nil || channelTag.HeaderOverride != nil) &&
@@ -1167,6 +1280,9 @@ func DeleteChannelBatch(c *gin.Context) {
 	err := c.ShouldBindJSON(&channelBatch)
 	if err != nil || len(channelBatch.Ids) == 0 {
 		common.ApiErrorT(c, "Invalid parameters")
+		return
+	}
+	if !requireChannelsAccess(c, channelBatch.Ids) {
 		return
 	}
 	var revoked []*model.Channel
@@ -1231,6 +1347,12 @@ func UpdateChannel(c *gin.Context) {
 		common.ApiErrorT(c, "Invalid parameters")
 		return
 	}
+	usedQuotaValue, usedQuotaProvided := requestData["used_quota"]
+	requestedUsedQuota := channel.UsedQuota
+	if usedQuotaProvided && (usedQuotaValue == nil || requestedUsedQuota < 0) {
+		common.ApiErrorT(c, "Invalid parameters")
+		return
+	}
 	clearChannelReadOnlyFields(&channel, requestData)
 
 	if channel.Type == constant.ChannelTypeTaskPlugin &&
@@ -1254,6 +1376,16 @@ func UpdateChannel(c *gin.Context) {
 	if err != nil {
 		common.ApiError(c, err)
 		return
+	}
+	// The channel id arrives in the body here, so the group scope cannot be
+	// enforced by the router middleware.
+	if !requireChannelAccess(c, originChannel) {
+		return
+	}
+	if c.GetInt("role") != common.RoleRootUser {
+		// An administrator keeps their channels inside their own group; moving
+		// one elsewhere would hand it to another tenant or hide it from view.
+		channel.Group = strings.TrimSpace(c.GetString("group"))
 	}
 	originProxy := originChannel.GetSetting().Proxy
 	proxyChanged := false
@@ -1436,10 +1568,21 @@ func UpdateChannel(c *gin.Context) {
 		}
 		keyAfter = stored.Key
 	}
+	if usedQuotaProvided {
+		// Channel.Update uses struct Updates; persist the explicit quota separately so zero is honored.
+		channel.UsedQuota = 0
+	}
 	err = channel.Update()
 	if err != nil {
 		common.ApiError(c, err)
 		return
+	}
+	if usedQuotaProvided {
+		if err := model.SetChannelUsedQuota(channel.Id, requestedUsedQuota); err != nil {
+			common.ApiError(c, err)
+			return
+		}
+		channel.UsedQuota = requestedUsedQuota
 	}
 	model.InitChannelCache()
 	if proxyChanged {
@@ -1455,6 +1598,9 @@ func UpdateChannel(c *gin.Context) {
 	}
 	if channel.Group != originChannel.Group {
 		changedFields = append(changedFields, "group")
+	}
+	if usedQuotaProvided {
+		changedFields = append(changedFields, "used_quota")
 	}
 	if channel.Type != originChannel.Type {
 		changedFields = append(changedFields, "type")
@@ -1518,6 +1664,9 @@ func BatchUpdateChannelStatus(c *gin.Context) {
 	req := ChannelStatusBatchRequest{}
 	if err := c.ShouldBindJSON(&req); err != nil || len(req.Ids) == 0 || !isManageableChannelStatus(req.Status) {
 		common.ApiErrorT(c, "Invalid parameters")
+		return
+	}
+	if !requireChannelsAccess(c, req.Ids) {
 		return
 	}
 	changedCount := 0
@@ -1706,6 +1855,12 @@ func FetchModels(c *gin.Context) {
 			common.ApiError(c, err)
 			return
 		}
+		// A saved channel is reused here, including its key, so the caller must
+		// be allowed to use it. A preview built from the request body has no
+		// stored channel to scope.
+		if req.ChannelID > 0 && !requireChannelAccess(c, channel) {
+			return
+		}
 	} else {
 		baseURL := ""
 		if req.BaseURL != nil {
@@ -1751,6 +1906,9 @@ func BatchSetChannelTag(c *gin.Context) {
 		common.ApiErrorT(c, "Invalid parameters")
 		return
 	}
+	if !requireChannelsAccess(c, channelBatch.Ids) {
+		return
+	}
 	err = model.BatchSetChannelTag(channelBatch.Ids, channelBatch.Tag)
 	if err != nil {
 		common.ApiError(c, err)
@@ -1775,7 +1933,15 @@ func GetTagModels(c *gin.Context) {
 		return
 	}
 
-	channels, err := model.GetChannelsByTag(tag, false, false) // idSort=false, selectAll=false
+	group, hasGroup := channelGroupScope(c, c.Query("group"))
+	query := model.DB.Model(&model.Channel{}).Where("tag = ?", tag).Omit("key")
+	if !hasGroup {
+		query = query.Where("1 = 0")
+	} else {
+		query = model.ApplyChannelGroupFilter(query, group)
+	}
+	var channels []*model.Channel
+	err := query.Find(&channels).Error
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"success": false,
@@ -1924,6 +2090,9 @@ func ManageMultiKeys(c *gin.Context) {
 	channel, err := model.GetChannelById(request.ChannelId, true)
 	if err != nil {
 		common.ApiErrorT(c, "Channel does not exist")
+		return
+	}
+	if !requireChannelAccess(c, channel) {
 		return
 	}
 
@@ -2386,6 +2555,9 @@ func OllamaPullModel(c *gin.Context) {
 		})
 		return
 	}
+	if !requireChannelAccess(c, channel) {
+		return
+	}
 
 	// 检查是否是 Ollama 渠道
 	if channel.Type != constant.ChannelTypeOllama {
@@ -2447,6 +2619,9 @@ func OllamaPullModelStream(c *gin.Context) {
 			"success": false,
 			"message": "Channel not found",
 		})
+		return
+	}
+	if !requireChannelAccess(c, channel) {
 		return
 	}
 
@@ -2529,6 +2704,9 @@ func OllamaDeleteModel(c *gin.Context) {
 			"success": false,
 			"message": "Channel not found",
 		})
+		return
+	}
+	if !requireChannelAccess(c, channel) {
 		return
 	}
 

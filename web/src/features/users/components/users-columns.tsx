@@ -34,6 +34,8 @@ import {
 } from '@/components/ui/tooltip'
 import { getCurrencyDisplay } from '@/lib/currency'
 import { formatQuota } from '@/lib/format'
+import { ROLE } from '@/lib/roles'
+import { useAuthStore } from '@/stores/auth-store'
 import { useSystemConfigStore } from '@/stores/system-config-store'
 
 import {
@@ -48,6 +50,9 @@ import { UserQuotaCell } from './user-quota-cell'
 
 export function useUsersColumns(): ColumnDef<User>[] {
   const { t } = useTranslation()
+  const isRoot = useAuthStore(
+    (state) => state.auth.user?.role === ROLE.SUPER_ADMIN
+  )
   const currencyConfig = useSystemConfigStore((state) => state.config.currency)
   const { meta: currency } = getCurrencyDisplay()
   const quotaUnit = currency.kind === 'tokens' ? t('Tokens') : currency.symbol
@@ -106,7 +111,7 @@ export function useUsersColumns(): ColumnDef<User>[] {
                 <LongText className='max-w-[140px] text-sm font-normal'>
                   {username}
                 </LongText>
-                {remark && (
+                {isRoot && remark && (
                   <Tooltip>
                     <TooltipTrigger
                       render={
@@ -298,6 +303,6 @@ export function useUsersColumns(): ColumnDef<User>[] {
     ],
     // formatQuota reads the currency configuration from the store.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [t, quotaUnit, currencyConfig]
+    [t, quotaUnit, currencyConfig, isRoot]
   )
 }

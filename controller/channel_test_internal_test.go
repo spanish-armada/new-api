@@ -6,11 +6,13 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"sync/atomic"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
@@ -48,6 +50,216 @@ func TestGetChannelDefaultBaseURLsUsesBuiltInDefaults(t *testing.T) {
 	assert.NotContains(t, response.Data, constant.ChannelTypeAzure)
 	assert.NotContains(t, response.Data, constant.ChannelTypeNewAPI)
 	assert.NotContains(t, response.Data, constant.ChannelTypeTaskPlugin)
+}
+
+func TestChannelListAndDetailsAreScopedToUserGroup(t *testing.T) {
+	db := setupModelListControllerTestDB(t)
+	channels := []*model.Channel{
+		{Name: "visible-channel", Key: "visible-key", Group: "team-a,shared", Models: "gpt-a", Tag: common.GetPointer("shared-tag")},
+		{Name: "other-channel", Key: "other-key", Group: "team-b", Models: "gpt-b", Tag: common.GetPointer("shared-tag")},
+		{Name: "prefix-channel", Key: "prefix-key", Group: "team-alpha", Models: "gpt-prefix", Tag: common.GetPointer("shared-tag")},
+	}
+	for _, channel := range channels {
+		require.NoError(t, db.Create(channel).Error)
+	}
+
+	newContext := func(path string, role int, group string) (*gin.Context, *httptest.ResponseRecorder) {
+		recorder := httptest.NewRecorder()
+		ctx, _ := gin.CreateTestContext(recorder)
+		ctx.Request = httptest.NewRequest(http.MethodGet, path, nil)
+		ctx.Set("role", role)
+		ctx.Set("group", group)
+		return ctx, recorder
+	}
+
+	ctx, recorder := newContext("/api/channel/?group=all", common.RoleAdminUser, "team-a")
+	GetAllChannels(ctx)
+	var listResponse struct {
+		Data struct {
+			Items []*model.Channel `json:"items"`
+			Total int              `json:"total"`
+		} `json:"data"`
+	}
+	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &listResponse))
+	require.Equal(t, 1, listResponse.Data.Total, recorder.Body.String())
+	require.Equal(t, "visible-channel", listResponse.Data.Items[0].Name)
+
+	ctx, recorder = newContext("/api/channel/search?keyword=channel&group=team-b", common.RoleAdminUser, "team-a")
+	SearchChannels(ctx)
+	var searchResponse struct {
+		Data struct {
+			Items []*model.Channel `json:"items"`
+			Total int              `json:"total"`
+		} `json:"data"`
+	}
+	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &searchResponse))
+	require.Equal(t, 1, searchResponse.Data.Total)
+	require.Equal(t, "visible-channel", searchResponse.Data.Items[0].Name)
+
+	ctx, recorder = newContext("/api/channel/tag/models?tag=shared-tag&group=team-b", common.RoleAdminUser, "team-a")
+	GetTagModels(ctx)
+	var tagModelsResponse struct {
+		Data string `json:"data"`
+	}
+	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &tagModelsResponse))
+	assert.Equal(t, "gpt-a", tagModelsResponse.Data)
+
+	ctx, recorder = newContext("/api/channel/"+fmt.Sprint(channels[0].Id), common.RoleAdminUser, "team-a")
+	ctx.Params = gin.Params{{Key: "id", Value: fmt.Sprint(channels[0].Id)}}
+	GetChannel(ctx)
+	require.Equal(t, http.StatusOK, recorder.Code)
+	var detailResponse struct {
+		Data model.Channel `json:"data"`
+	}
+	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &detailResponse))
+	assert.Equal(t, "visible-channel", detailResponse.Data.Name)
+
+	ctx, recorder = newContext("/api/channel/"+fmt.Sprint(channels[1].Id), common.RoleAdminUser, "team-a")
+	ctx.Params = gin.Params{{Key: "id", Value: fmt.Sprint(channels[1].Id)}}
+	GetChannel(ctx)
+	assert.Equal(t, http.StatusNotFound, recorder.Code)
+
+	ctx, recorder = newContext("/api/channel/?group=all", common.RoleRootUser, "")
+	GetAllChannels(ctx)
+	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &listResponse))
+	assert.Equal(t, 3, listResponse.Data.Total)
+
+	ctx, recorder = newContext("/api/channel/?group=all", common.RoleAdminUser, "")
+	GetAllChannels(ctx)
+	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &listResponse))
+	assert.Zero(t, listResponse.Data.Total)
+
+	engine := gin.New()
+	engine.Use(func(c *gin.Context) {
+		c.Set("role", common.RoleAdminUser)
+		c.Set("group", "team-a")
+	})
+	engine.GET("/channel/:id/credentials", middleware.ChannelGroupScope(), func(c *gin.Context) {
+		c.Status(http.StatusNoContent)
+	})
+	recorder = httptest.NewRecorder()
+	engine.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, fmt.Sprintf("/channel/%d/credentials", channels[0].Id), nil))
+	assert.Equal(t, http.StatusNoContent, recorder.Code)
+
+	recorder = httptest.NewRecorder()
+	engine.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, fmt.Sprintf("/channel/%d/credentials", channels[1].Id), nil))
+	assert.Equal(t, http.StatusNotFound, recorder.Code)
+}
+
+func TestChannelWritesAreScopedToUserGroup(t *testing.T) {
+	initModelListColumnNames(t)
+	setupTaskPluginBindChannelTest(t)
+	visible := &model.Channel{Name: "visible-channel", Key: "visible-key", Status: common.ChannelStatusEnabled, Models: "gpt-a", Group: "team-a"}
+	require.NoError(t, visible.Insert())
+	other := &model.Channel{Name: "other-channel", Key: "other-key", Status: common.ChannelStatusEnabled, Models: "gpt-b", Group: "team-b"}
+	require.NoError(t, other.Insert())
+
+	call := func(handler gin.HandlerFunc, role int, group, method, target, body string, params ...gin.Param) *httptest.ResponseRecorder {
+		recorder := httptest.NewRecorder()
+		ctx, _ := gin.CreateTestContext(recorder)
+		ctx.Set("id", 2)
+		ctx.Set("role", role)
+		ctx.Set("group", group)
+		ctx.Request = httptest.NewRequest(method, target, bytes.NewBufferString(body))
+		ctx.Request.Header.Set("Content-Type", "application/json")
+		ctx.Params = params
+		handler(ctx)
+		return recorder
+	}
+	storedName := func(id int) string {
+		var stored model.Channel
+		require.NoError(t, model.DB.Select("name").First(&stored, id).Error)
+		return stored.Name
+	}
+
+	recorder := call(UpdateChannel, common.RoleAdminUser, "team-a", http.MethodPut, "/api/channel",
+		fmt.Sprintf(`{"id":%d,"name":"hijacked"}`, other.Id))
+	assert.Equal(t, http.StatusNotFound, recorder.Code, recorder.Body.String())
+	assert.Equal(t, "other-channel", storedName(other.Id))
+
+	recorder = call(UpdateChannel, common.RoleAdminUser, "team-a", http.MethodPut, "/api/channel",
+		fmt.Sprintf(`{"id":%d,"name":"renamed-visible"}`, visible.Id))
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	assert.Contains(t, recorder.Body.String(), `"success":true`)
+	assert.Equal(t, "renamed-visible", storedName(visible.Id))
+
+	recorder = call(DeleteChannelBatch, common.RoleAdminUser, "team-a", http.MethodPost, "/api/channel/batch",
+		fmt.Sprintf(`{"ids":[%d]}`, other.Id))
+	assert.Equal(t, http.StatusNotFound, recorder.Code, recorder.Body.String())
+	assert.Equal(t, "other-channel", storedName(other.Id))
+
+	recorder = call(AddChannel, common.RoleAdminUser, "team-a", http.MethodPost, "/api/channel",
+		`{"mode":"single","channel":{"name":"new-channel","type":1,"key":"sk-new","models":"gpt-c","group":"team-b"}}`)
+	require.Contains(t, recorder.Body.String(), `"success":true`, recorder.Body.String())
+	var created model.Channel
+	require.NoError(t, model.DB.Where("name = ?", "new-channel").First(&created).Error)
+	assert.Equal(t, "team-a", created.Group, "an administrator creates channels in their own group only")
+}
+
+// TestChannelGroupScopeDatabaseMatrix runs the group filter against every
+// supported database: the predicate is dialect-specific (CONCAT on MySQL, ||
+// elsewhere), so a syntax error would only surface on the failing engine.
+func TestChannelGroupScopeDatabaseMatrix(t *testing.T) {
+	for _, dialect := range []struct{ kind, env string }{
+		{"sqlite", ""},
+		{"mysql", "TEST_MYSQL_DSN"},
+		{"postgres", "TEST_POSTGRES_DSN"},
+	} {
+		t.Run(dialect.kind, func(t *testing.T) {
+			dsn := ""
+			if dialect.env != "" {
+				dsn = os.Getenv(dialect.env)
+				if dsn == "" {
+					t.Skipf("%s is not set", dialect.env)
+				}
+			}
+			db := modelManagementDB(t, dialect.kind, dsn)
+			for _, channel := range []*model.Channel{
+				{Name: "team-a-channel", Key: "key-a", Status: common.ChannelStatusEnabled, Models: "gpt-a", Group: "team-a"},
+				{Name: "team-b-channel", Key: "key-b", Status: common.ChannelStatusEnabled, Models: "gpt-b", Group: "team-b"},
+				{Name: "shared-channel", Key: "key-s", Status: common.ChannelStatusEnabled, Models: "gpt-s", Group: "team-a,team-b"},
+			} {
+				require.NoError(t, db.Create(channel).Error)
+			}
+
+			call := func(handler gin.HandlerFunc, role int, group, method, target, body string) *httptest.ResponseRecorder {
+				recorder := httptest.NewRecorder()
+				ctx, _ := gin.CreateTestContext(recorder)
+				ctx.Set("id", 2)
+				ctx.Set("role", role)
+				ctx.Set("group", group)
+				ctx.Request = httptest.NewRequest(method, target, bytes.NewBufferString(body))
+				ctx.Request.Header.Set("Content-Type", "application/json")
+				handler(ctx)
+				return recorder
+			}
+
+			recorder := call(GetAllChannels, common.RoleAdminUser, "team-a", http.MethodGet, "/api/channel/?group=all", "")
+			var list struct {
+				Data struct {
+					Items []*model.Channel `json:"items"`
+					Total int              `json:"total"`
+				} `json:"data"`
+			}
+			require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &list), recorder.Body.String())
+			assert.Equal(t, 2, list.Data.Total, "team-a sees its own and the shared channel only")
+
+			var teamB model.Channel
+			require.NoError(t, db.Where("name = ?", "team-b-channel").First(&teamB).Error)
+			recorder = call(UpdateChannel, common.RoleAdminUser, "team-a", http.MethodPut, "/api/channel",
+				fmt.Sprintf(`{"id":%d,"name":"hijacked"}`, teamB.Id))
+			assert.Equal(t, http.StatusNotFound, recorder.Code, recorder.Body.String())
+			require.NoError(t, db.Select("name").First(&teamB, teamB.Id).Error)
+			assert.Equal(t, "team-b-channel", teamB.Name)
+
+			recorder = call(DeleteChannelBatch, common.RoleAdminUser, "team-a", http.MethodPost, "/api/channel/batch",
+				fmt.Sprintf(`{"ids":[%d]}`, teamB.Id))
+			assert.Equal(t, http.StatusNotFound, recorder.Code, recorder.Body.String())
+			var remaining int64
+			require.NoError(t, db.Model(&model.Channel{}).Where("id = ?", teamB.Id).Count(&remaining).Error)
+			assert.EqualValues(t, 1, remaining)
+		})
+	}
 }
 
 func TestValidateChannelProxy(t *testing.T) {
@@ -224,6 +436,7 @@ func TestDeleteChannelBatchReportsAndAuditsActualDeletedCount(t *testing.T) {
 	require.NoError(t, err)
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Set("role", common.RoleRootUser)
 	ctx.Request = httptest.NewRequest(http.MethodDelete, "/api/channel/batch", bytes.NewReader(requestBody))
 	ctx.Request.Header.Set("Content-Type", "application/json")
 

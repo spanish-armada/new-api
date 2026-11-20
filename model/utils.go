@@ -23,6 +23,7 @@ const (
 
 var batchUpdateStores []map[int]int
 var batchUpdateLocks []sync.Mutex
+var channelQuotaUpdateLock sync.Mutex
 
 func init() {
 	for range BatchUpdateTypeCount {
@@ -79,8 +80,21 @@ func batchUpdate() {
 	}
 
 	common.SysLog(common.LogText("batch update started"))
+	channelQuotaUpdateLock.Lock()
+	batchUpdateLocks[BatchUpdateTypeChannelUsedQuota].Lock()
+	channelStore := batchUpdateStores[BatchUpdateTypeChannelUsedQuota]
+	batchUpdateStores[BatchUpdateTypeChannelUsedQuota] = make(map[int]int)
+	batchUpdateLocks[BatchUpdateTypeChannelUsedQuota].Unlock()
+	for key, value := range channelStore {
+		updateChannelUsedQuota(key, value)
+	}
+	channelQuotaUpdateLock.Unlock()
+
 	stores := make([]map[int]int, BatchUpdateTypeCount)
 	for i := range BatchUpdateTypeCount {
+		if i == BatchUpdateTypeChannelUsedQuota {
+			continue
+		}
 		batchUpdateLocks[i].Lock()
 		stores[i] = batchUpdateStores[i]
 		batchUpdateStores[i] = make(map[int]int)
@@ -88,7 +102,10 @@ func batchUpdate() {
 	}
 
 	for i, store := range stores {
-		if i == BatchUpdateTypeUserQuota || i == BatchUpdateTypeUsedQuota || i == BatchUpdateTypeRequestCount {
+		if i == BatchUpdateTypeUserQuota ||
+			i == BatchUpdateTypeUsedQuota ||
+			i == BatchUpdateTypeChannelUsedQuota ||
+			i == BatchUpdateTypeRequestCount {
 			continue
 		}
 		for key, value := range store {
@@ -98,8 +115,6 @@ func batchUpdate() {
 				if err != nil {
 					common.SysLog(common.LogText("failed to batch update token quota: %s", err.Error()))
 				}
-			case BatchUpdateTypeChannelUsedQuota:
-				updateChannelUsedQuota(key, value)
 			}
 		}
 	}

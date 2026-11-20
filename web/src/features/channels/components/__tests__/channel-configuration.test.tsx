@@ -478,6 +478,36 @@ test('selecting a plugin opens a prefilled channel and creates its explicit bind
   expect(screen.getByLabelText('API Key *')).toHaveValue('')
 })
 
+test('a new channel defaults to the current user group', async () => {
+  useAuthStore.setState({
+    auth: {
+      ...originalAuth,
+      user: {
+        id: 1,
+        username: 'root',
+        role: ROLE.SUPER_ADMIN,
+        group: 'premium',
+      },
+    },
+  })
+  const post = vi
+    .spyOn(api, 'post')
+    .mockResolvedValue({ data: { success: true } })
+  const user = userEvent.setup()
+  render(<ConfigurationHarness />)
+
+  await user.click(await screen.findByRole('option', { name: /Video A/ }))
+  fireEvent.change(screen.getByLabelText('API Key *'), {
+    target: { value: 'channel-secret' },
+  })
+  await user.click(screen.getByRole('button', { name: 'Create Channel' }))
+
+  await waitFor(() => expect(post).toHaveBeenCalled())
+  expect(post.mock.calls[0][1]).toMatchObject({
+    channel: { group: 'premium' },
+  })
+})
+
 test('changing plugins preserves credentials and custom settings while applying existing model and address rules', async () => {
   const user = userEvent.setup()
   render(<ConfigurationHarness />)

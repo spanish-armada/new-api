@@ -38,7 +38,9 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { handleServerError } from '@/lib/handle-server-error'
+import { ROLE } from '@/lib/roles'
 import { createServerError } from '@/lib/server-error-message'
+import { useAuthStore } from '@/stores/auth-store'
 
 import { previewUpstreamDiff, syncUpstream } from '../../api'
 import { getSyncLocaleOptions } from '../../constants'
@@ -85,6 +87,9 @@ export function SyncWizardDialog(props: {
 }) {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
+  const isRoot = useAuthStore(
+    (state) => state.auth.user?.role === ROLE.SUPER_ADMIN
+  )
   const [locale, setLocale] = useState<SyncLocale>('zh')
   const [preview, setPreview] = useState<MetadataSyncPreview | null>(null)
   const [scope, setScope] = useState('site')
@@ -159,10 +164,11 @@ export function SyncWizardDialog(props: {
     const keyword = search.trim().toLowerCase()
     return (preview?.candidates ?? []).filter(
       (item) =>
+        (isRoot || item.kind !== 'create') &&
         (scope === 'catalog' || item.scope === 'site') &&
         item.model_name.toLowerCase().includes(keyword)
     )
-  }, [preview, scope, search])
+  }, [preview, scope, search, isRoot])
   const syncableCandidates = useMemo(
     () => filteredCandidates.filter(isMetadataSyncable),
     [filteredCandidates]

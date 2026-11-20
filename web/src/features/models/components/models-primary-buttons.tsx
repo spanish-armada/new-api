@@ -29,6 +29,8 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { useCanEditModelPricing } from '@/features/model-pricing/api'
+import { ROLE } from '@/lib/roles'
+import { useAuthStore } from '@/stores/auth-store'
 
 import { useModels } from './models-provider'
 
@@ -36,6 +38,9 @@ export function ModelsPrimaryButtons() {
   const { t } = useTranslation()
   const { setOpen, setCurrentRow } = useModels()
   const canPrice = useCanEditModelPricing()
+  const isRoot = useAuthStore(
+    (state) => state.auth.user?.role === ROLE.SUPER_ADMIN
+  )
 
   const handleCreateModel = () => {
     setCurrentRow(null)
@@ -68,11 +73,12 @@ export function ModelsPrimaryButtons() {
           {t('Sync pricing')}
         </Button>
       )}
-      {/* Create Model */}
-      <Button onClick={handleCreateModel} size='sm'>
-        <Plus className='h-4 w-4' />
-        {t('Add Model')}
-      </Button>
+      {isRoot && (
+        <Button onClick={handleCreateModel} size='sm'>
+          <Plus className='h-4 w-4' />
+          {t('Add Model')}
+        </Button>
+      )}
 
       {/* More Actions */}
       <DropdownMenu>

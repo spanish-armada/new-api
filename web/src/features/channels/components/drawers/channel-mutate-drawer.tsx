@@ -627,10 +627,18 @@ export function ChannelMutateDrawer({
   const isMultiKeyChannel =
     isEditing && channelData?.data?.channel_info?.is_multi_key === true
 
+  const channelFormDefaultValues = useMemo(
+    () => ({
+      ...CHANNEL_FORM_DEFAULT_VALUES,
+      group: [currentUser?.group || 'default'],
+    }),
+    [currentUser?.group]
+  )
+
   // Form setup
   const form = useForm<ChannelFormValues>({
     resolver: zodResolver(channelFormSchema),
-    defaultValues: CHANNEL_FORM_DEFAULT_VALUES,
+    defaultValues: channelFormDefaultValues,
   })
 
   // Watch values once for conditional fields and configuration indicators.
@@ -1129,7 +1137,7 @@ export function ChannelMutateDrawer({
   useEffect(() => {
     if (!open) {
       setModelConfiguration(null)
-      form.reset(CHANNEL_FORM_DEFAULT_VALUES)
+      form.reset(channelFormDefaultValues)
       loadedForm.current = null
       setProviderTarget(null)
       setChoosingProvider(true)
@@ -1174,13 +1182,21 @@ export function ChannelMutateDrawer({
       initialStatusCodeMappingRef.current =
         channelData.data.status_code_mapping || ''
     } else if (!isEditing) {
-      form.reset(CHANNEL_FORM_DEFAULT_VALUES)
+      form.reset(channelFormDefaultValues)
       resetModelMappingSync()
       initialModelsRef.current = []
       initialModelMappingRef.current = ''
       initialStatusCodeMappingRef.current = ''
     }
-  }, [isEditing, channelId, channelData, form, open, resetModelMappingSync])
+  }, [
+    isEditing,
+    channelId,
+    channelData,
+    channelFormDefaultValues,
+    form,
+    open,
+    resetModelMappingSync,
+  ])
 
   // Handle type change - set default values for specific types
   useEffect(() => {
@@ -1941,11 +1957,18 @@ export function ChannelMutateDrawer({
       }
       onOpenChange(v)
       if (!v) {
-        form.reset(CHANNEL_FORM_DEFAULT_VALUES)
+        form.reset(channelFormDefaultValues)
         setClipboardConnectionInfo(null)
       }
     },
-    [onOpenChange, form, isSubmitting, showProviderPicker, providerTarget]
+    [
+      onOpenChange,
+      form,
+      channelFormDefaultValues,
+      isSubmitting,
+      showProviderPicker,
+      providerTarget,
+    ]
   )
 
   const proxyFields = (

@@ -176,6 +176,17 @@ func ApplyChannelGroupFilter(query *gorm.DB, group string) *gorm.DB {
 	return query.Where(channelGroupFilterCondition(), channelGroupFilterPattern(group))
 }
 
+// ChannelInGroup reports whether a channel serves the given administrator group.
+// An empty group grants nothing: an administrator without a group cannot reach
+// any channel. Root callers bypass this check before reaching here.
+func ChannelInGroup(channel *Channel, group string) bool {
+	group = strings.TrimSpace(group)
+	if group == "" || channel == nil {
+		return false
+	}
+	return slices.Contains(channel.GetGroups(), group)
+}
+
 // Value implements driver.Valuer interface
 // 必须返回 string 而非 []byte:PG simple protocol 下 []byte 参数按 bytea
 // 编码,写 json 列会触发 SQLSTATE 22P02。
@@ -1071,10 +1082,37 @@ func EditChannelByTag(tag string, newTag *string, modelMapping *string, models *
 
 func UpdateChannelUsedQuota(id int, quota int) {
 	if common.BatchUpdateEnabled {
+		// The queued delta is already atomic under the batch store lock, and
+		// batchUpdate serializes its flush with SetChannelUsedQuota through
+		// channelQuotaUpdateLock. Taking that lock here would serialize every
+		// relay request behind the whole flush loop for no correctness gain.
 		addNewRecord(BatchUpdateTypeChannelUsedQuota, id, quota)
 		return
 	}
+	channelQuotaUpdateLock.Lock()
+	defer channelQuotaUpdateLock.Unlock()
 	updateChannelUsedQuota(id, quota)
+}
+
+// SetChannelUsedQuota writes an absolute used quota. Queued deltas are flushed
+// first so they are not silently dropped, then the target value replaces the
+// stored counter: usage recorded by the caller's read and this write is lost,
+// which is the intended meaning of resetting a counter.
+func SetChannelUsedQuota(id int, quota int64) error {
+	channelQuotaUpdateLock.Lock()
+	defer channelQuotaUpdateLock.Unlock()
+	batchUpdateLocks[BatchUpdateTypeChannelUsedQuota].Lock()
+	pendingQuota := batchUpdateStores[BatchUpdateTypeChannelUsedQuota][id]
+	delete(batchUpdateStores[BatchUpdateTypeChannelUsedQuota], id)
+	batchUpdateLocks[BatchUpdateTypeChannelUsedQuota].Unlock()
+	if pendingQuota != 0 {
+		updateChannelUsedQuota(id, pendingQuota)
+	}
+	if err := DB.Model(&Channel{}).Where("id = ?", id).Update("used_quota", quota).Error; err != nil {
+		return err
+	}
+	BumpSyncTopic(SyncTopicChannels)
+	return nil
 }
 
 func updateChannelUsedQuota(id int, quota int) {
