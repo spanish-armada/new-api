@@ -36,6 +36,7 @@ import { resolveLocalizedText } from '@/lib/localized-text'
 import { getServerErrorMessage } from '@/lib/server-error-message'
 
 import { usePluginLogin } from '../../hooks/use-plugin-login'
+import type { Channel } from '../../types'
 import {
   DeviceStep,
   FieldsStep,
@@ -50,18 +51,20 @@ type PluginLoginDialogProps = {
   open: boolean
   onOpenChange: (open: boolean) => void
   channelId: number
+  draftChannel?: Partial<Channel>
   /** null logs in a new credential; an index logs in again on that line. */
   keyIndex: number | null
   /** Keeps a single-key channel's account and adds the new one next to it. */
   add?: boolean
   plugin: PluginIconInput
-  onDone?: () => void
+  onDone?: (flow: string) => void
 }
 
 export function PluginLoginDialog(props: PluginLoginDialogProps) {
   const { t, i18n } = useTranslation()
   const login = usePluginLogin({
     channelId: props.channelId,
+    draftChannel: props.draftChannel,
     keyIndex: props.keyIndex,
     add: props.add,
     onDone: props.onDone,

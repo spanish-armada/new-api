@@ -143,9 +143,9 @@ export async function getTaskPluginOptions(): Promise<TaskPluginOption[]> {
     success: boolean
     data: TaskPluginOption[]
   }>('/api/task_plugin_options')
-  return (requireServerSuccess(response.data).data ?? []).filter(
-    (option) => option.task !== false || option.provider === true
-  )
+  return (requireServerSuccess(response.data).data ?? [])
+    .map((option) => ({ ...option, models: option.models ?? [] }))
+    .filter((option) => option.task !== false || option.provider === true)
 }
 
 export type CodexUsageResponse = {
@@ -496,19 +496,29 @@ export async function startPluginLogin(
   return requireServerSuccess(res.data).data
 }
 
+export async function startDraftPluginLogin(
+  channel: Partial<Channel>
+): Promise<{ flow: string; step: PluginLoginStep }> {
+  const res = await api.post<{
+    success: boolean
+    data: { flow: string; step: PluginLoginStep }
+  }>('/api/channel/plugin_login/draft', { channel }, channelActionConfig())
+  return requireServerSuccess(res.data).data
+}
+
 export async function continuePluginLogin(
   channelId: number,
   flow: string,
   input: PluginLoginInput
 ): Promise<PluginLoginStep> {
+  const url =
+    channelId === 0
+      ? '/api/channel/plugin_login/draft/continue'
+      : `/api/channel/${channelId}/plugin_login/continue`
   const res = await api.post<{
     success: boolean
     data: { step: PluginLoginStep }
-  }>(
-    `/api/channel/${channelId}/plugin_login/continue`,
-    { flow, input },
-    channelActionConfig()
-  )
+  }>(url, { flow, input }, channelActionConfig())
   return requireServerSuccess(res.data).data.step
 }
 

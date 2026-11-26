@@ -1033,12 +1033,18 @@ func CreateUser(c *gin.Context) {
 		common.ApiErrorT(c, "Invalid input {{error}}", map[string]any{"error": err.Error()})
 		return
 	}
+	if user.Role == 0 {
+		user.Role = common.RoleCommonUser
+	}
 	if !common.IsValidateRole(user.Role) {
 		common.ApiErrorT(c, "Invalid parameters")
 		return
 	}
 	if user.DisplayName == "" {
 		user.DisplayName = user.Username
+	}
+	if user.Group == "" {
+		user.Group = user.Username
 	}
 	myRole := c.GetInt("role")
 	if user.Role >= myRole {
@@ -1054,11 +1060,6 @@ func CreateUser(c *gin.Context) {
 		}
 		auditParams["verification_method"] = authorization.Method
 	}
-	// Even for admin users, we cannot fully trust them!
-	// The group is the billing dimension, not an identity: it stays on the
-	// request value and falls back to the column default, exactly like
-	// self-registration and OAuth sign-up. Forcing a per-user group here left
-	// every new user in a group no channel serves.
 	cleanUser := model.User{
 		Username:    user.Username,
 		Password:    user.Password,
@@ -1067,8 +1068,15 @@ func CreateUser(c *gin.Context) {
 		Group:       user.Group,
 	}
 	authzTouched := false
+	var pricingGroupConfig string
+	var pricingGroupCreated bool
 	if err := model.DB.Transaction(func(tx *gorm.DB) error {
 		if err := cleanUser.InsertWithTx(tx, 0); err != nil {
+			return err
+		}
+		var err error
+		pricingGroupConfig, pricingGroupCreated, err = model.EnsurePricingGroupWithTx(tx, cleanUser.Username)
+		if err != nil {
 			return err
 		}
 		touched, err := updateAdminPermissionsForUserInTx(c, tx, cleanUser.Id, cleanUser.Role, user.AdminPermissions)
@@ -1077,6 +1085,12 @@ func CreateUser(c *gin.Context) {
 	}); err != nil {
 		common.ApiError(c, err)
 		return
+	}
+	if pricingGroupCreated {
+		if err := model.PublishPricingGroupConfig(pricingGroupConfig); err != nil {
+			common.ApiError(c, err)
+			return
+		}
 	}
 	if authzTouched {
 		model.BumpSyncTopic(model.SyncTopicAuthz)

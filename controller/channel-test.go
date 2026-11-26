@@ -118,6 +118,12 @@ func testChannel(ctx context.Context, channel *model.Channel, testUserID int, te
 	// Advanced Custom channel.
 	plugin, bound := service.PluginOfChannel(channel)
 	providerChannel := bound && plugin.Meta.HasProviderPart()
+	// The OpenAI Codex OAuth endpoint requires stream=true in the Responses
+	// request body, so its channel test must consume the reply as an SSE stream
+	// even though the channel test UI has no per-request stream selector.
+	if providerChannel && plugin.Meta.Key == "openai-codex-oauth" {
+		isStream = true
+	}
 	if lo.Contains(unsupportedTestChannelTypes, channel.Type) && !providerChannel {
 		channelTypeName := constant.GetChannelTypeName(channel.Type)
 		return testResult{

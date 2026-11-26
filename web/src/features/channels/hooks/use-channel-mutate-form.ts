@@ -67,9 +67,11 @@ export function useChannelMutateForm(props: UseChannelMutateFormParams) {
   )
 
   return useMutation({
-    mutationFn: async (
+    mutationFn: async (variables: {
       data: ChannelFormValues
-    ): Promise<{ messageKey: string; channelId?: number }> => {
+      pluginLoginFlow?: string
+    }): Promise<{ messageKey: string; channelId?: number }> => {
+      const { data, pluginLoginFlow } = variables
       if (props.isEditing && props.currentRow) {
         const payload = transformFormDataToUpdatePayload(
           data,
@@ -107,11 +109,13 @@ export function useChannelMutateForm(props: UseChannelMutateFormParams) {
       }
 
       const payload = transformFormDataToCreatePayload(data)
-      const response = await createChannel(payload)
+      const response = await createChannel({
+        ...payload,
+        ...(pluginLoginFlow ? { plugin_login_flow: pluginLoginFlow } : {}),
+      })
       if (!response.success) {
         throw createServerError(response, t(ERROR_MESSAGES.CREATE_FAILED))
       }
-      // A login plugin opens its login dialog on the new channel.
       return {
         messageKey: SUCCESS_MESSAGES.CREATED,
         channelId: response.data?.ids?.[0],

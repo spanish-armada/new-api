@@ -869,6 +869,7 @@ type AddChannelRequest struct {
 	Mode                      string                `json:"mode"`
 	MultiKeyMode              constant.MultiKeyMode `json:"multi_key_mode"`
 	BatchAddSetKeyPrefix2Name bool                  `json:"batch_add_set_key_prefix_2_name"`
+	PluginLoginFlow           string                `json:"plugin_login_flow,omitempty"`
 	Channel                   *model.Channel        `json:"channel"`
 }
 
@@ -933,6 +934,22 @@ func AddChannel(c *gin.Context) {
 	if err := validateChannel(addChannelRequest.Channel, true); err != nil {
 		common.ApiError(c, err)
 		return
+	}
+	if addChannelRequest.PluginLoginFlow != "" {
+		if addChannelRequest.Channel.Type != constant.ChannelTypeTaskPlugin || !service.ChannelSupportsPluginLogin(addChannelRequest.Channel) {
+			common.ApiErrorT(c, "Login flow is invalid or has expired")
+			return
+		}
+		identity, ok := pluginLoginIdentity(c)
+		if !ok {
+			return
+		}
+		credential, err := service.ConsumeDraftPluginLogin(identity, addChannelRequest.PluginLoginFlow, addChannelRequest.Channel)
+		if err != nil {
+			common.ApiError(c, err)
+			return
+		}
+		addChannelRequest.Channel.Key = credential
 	}
 	if err := checkPluginChannelKeys(c, addChannelRequest.Channel, addChannelRequest.Channel.Key, ""); err != nil {
 		common.ApiError(c, err)

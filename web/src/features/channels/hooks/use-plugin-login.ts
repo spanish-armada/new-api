@@ -25,7 +25,11 @@ import {
   useState,
 } from 'react'
 
-import { continuePluginLogin, startPluginLogin } from '../api'
+import {
+  continuePluginLogin,
+  startDraftPluginLogin,
+  startPluginLogin,
+} from '../api'
 import {
   INITIAL_PLUGIN_LOGIN_STATE,
   PLUGIN_LOGIN_BROADCAST_CHANNEL,
@@ -36,12 +40,14 @@ import {
   type PluginLoginInput,
   type PluginLoginRequest,
 } from '../lib/plugin-login'
+import type { Channel } from '../types'
 
 type UsePluginLoginOptions = {
   channelId: number
   keyIndex: number | null
+  draftChannel?: Partial<Channel>
   add?: boolean
-  onDone?: () => void
+  onDone?: (flow: string) => void
 }
 
 /**
@@ -57,10 +63,11 @@ export function usePluginLogin(options: UsePluginLoginOptions) {
   const channelId = options.channelId
   const keyIndex = options.keyIndex
   const add = options.add ?? false
+  const draftChannel = options.draftChannel
   const alive = useRef(true)
   const generation = useRef(0)
   const started = useRef(false)
-  const notifyDone = useEffectEvent(() => options.onDone?.())
+  const notifyDone = useEffectEvent(() => options.onDone?.(state.flow ?? ''))
 
   useEffect(() => {
     alive.current = true
@@ -76,7 +83,9 @@ export function usePluginLogin(options: UsePluginLoginOptions) {
       dispatch({ type: 'request', request })
       try {
         if (request.kind === 'start') {
-          const result = await startPluginLogin(channelId, keyIndex, add)
+          const result = draftChannel
+            ? await startDraftPluginLogin(draftChannel)
+            : await startPluginLogin(channelId, keyIndex, add)
           if (!stale()) {
             dispatch({ type: 'started', flow: result.flow, step: result.step })
           }
@@ -92,7 +101,7 @@ export function usePluginLogin(options: UsePluginLoginOptions) {
         if (!stale()) dispatch({ type: 'failed', error })
       }
     },
-    [channelId, keyIndex, add]
+    [channelId, keyIndex, add, draftChannel]
   )
 
   // Refs survive StrictMode's simulated remount, so one dialog opens one flow.

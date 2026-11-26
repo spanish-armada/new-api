@@ -77,25 +77,67 @@ type PluginLoginResult struct {
 	Step        PluginLoginStepView
 }
 
+// StartDraftPluginLogin starts a login flow for a channel that has not been
+// saved yet. The channel configuration and resulting credential stay server-side.
+func StartDraftPluginLogin(ctx context.Context, identity PluginLoginIdentity, channel *model.Channel) (PluginLoginResult, error) {
+	if channel == nil || channel.Type != constant.ChannelTypeTaskPlugin {
+		return PluginLoginResult{}, common.NewMessage("Invalid parameters")
+	}
+	plugin, err := loginPluginOfChannel(channel)
+	if err != nil {
+		return PluginLoginResult{}, err
+	}
+	setting := ""
+	if channel.Setting != nil {
+		setting = *channel.Setting
+	}
+	draft := &pluginLoginDraftChannel{
+		Name: channel.Name, PluginKey: plugin.Meta.Key, BaseURL: channel.GetBaseURL(),
+		Setting: setting, OtherSettings: channel.OtherSettings,
+	}
+	return startPluginLoginFlow(ctx, identity, channel, plugin, nil, false, draft)
+}
+
 // pluginLoginPayload is the server-side state of a flow. Seq changes with
 // every write, so the compare-and-swap on the whole payload never confuses
 // two states.
 type pluginLoginPayload struct {
-	Seq             int64               `json:"seq"`
-	ChannelID       int                 `json:"channel_id"`
-	KeyIndex        *int                `json:"key_index"`
-	Add             bool                `json:"add,omitempty"`
-	CodeVerifier    string              `json:"code_verifier"`
-	Nonce           string              `json:"nonce"`
-	Session         json.RawMessage     `json:"session,omitempty"`
-	Step            string              `json:"step"`
-	Issuer          string              `json:"issuer,omitempty"`
-	Fields          []string            `json:"fields,omitempty"`
-	Interval        int                 `json:"interval,omitempty"`
-	NextPollAt      int64               `json:"next_poll_at,omitempty"`
-	DeviceExpiresAt int64               `json:"device_expires_at,omitempty"`
-	ClaimedUntil    int64               `json:"claimed_until,omitempty"`
-	View            PluginLoginStepView `json:"view"`
+	Seq             int64                    `json:"seq"`
+	ChannelID       int                      `json:"channel_id"`
+	DraftChannel    *pluginLoginDraftChannel `json:"draft_channel,omitempty"`
+	DraftCredential string                   `json:"draft_credential,omitempty"`
+	KeyIndex        *int                     `json:"key_index"`
+	Add             bool                     `json:"add,omitempty"`
+	CodeVerifier    string                   `json:"code_verifier"`
+	Nonce           string                   `json:"nonce"`
+	Session         json.RawMessage          `json:"session,omitempty"`
+	Step            string                   `json:"step"`
+	Issuer          string                   `json:"issuer,omitempty"`
+	Fields          []string                 `json:"fields,omitempty"`
+	Interval        int                      `json:"interval,omitempty"`
+	NextPollAt      int64                    `json:"next_poll_at,omitempty"`
+	DeviceExpiresAt int64                    `json:"device_expires_at,omitempty"`
+	ClaimedUntil    int64                    `json:"claimed_until,omitempty"`
+	View            PluginLoginStepView      `json:"view"`
+}
+
+type pluginLoginDraftChannel struct {
+	Name          string `json:"name"`
+	PluginKey     string `json:"plugin_key"`
+	BaseURL       string `json:"base_url"`
+	Setting       string `json:"setting"`
+	OtherSettings string `json:"other_settings,omitempty"`
+}
+
+func (draft pluginLoginDraftChannel) channel() *model.Channel {
+	channel := &model.Channel{
+		Type:          constant.ChannelTypeTaskPlugin,
+		Name:          draft.Name,
+		BaseURL:       &draft.BaseURL,
+		OtherSettings: draft.OtherSettings,
+	}
+	channel.Setting = &draft.Setting
+	return channel
 }
 
 var vendorErrorCodePattern = regexp.MustCompile(`^[A-Za-z0-9_.\-]{1,64}$`)
@@ -146,14 +188,20 @@ func StartPluginLogin(ctx context.Context, identity PluginLoginIdentity, channel
 	if err != nil {
 		return PluginLoginResult{}, err
 	}
+	if keyIndex != nil && (*keyIndex < 0 || *keyIndex >= len(pluginCredentialKeyLines(channel))) {
+		return PluginLoginResult{}, common.NewMessage("Credential index out of range")
+	}
+	return startPluginLoginFlow(ctx, identity, channel, plugin, keyIndex, add, nil)
+}
+
+func startPluginLoginFlow(ctx context.Context, identity PluginLoginIdentity, channel *model.Channel, plugin *jsplugin.LoadedPlugin, keyIndex *int, add bool, draft *pluginLoginDraftChannel) (PluginLoginResult, error) {
 	var credential json.RawMessage
 	if keyIndex != nil {
 		lines := pluginCredentialKeyLines(channel)
-		if *keyIndex < 0 || *keyIndex >= len(lines) {
-			return PluginLoginResult{}, common.NewMessage("Credential index out of range")
-		}
-		if stored, ok := jsplugin.ParseCredential(lines[*keyIndex]); ok && stored.Plugin == plugin.Meta.Key {
-			credential = stored.Data
+		if *keyIndex >= 0 && *keyIndex < len(lines) {
+			if stored, ok := jsplugin.ParseCredential(lines[*keyIndex]); ok && stored.Plugin == plugin.Meta.Key {
+				credential = stored.Data
+			}
 		}
 	}
 	verifier, err := randomURLToken()
@@ -166,7 +214,8 @@ func StartPluginLogin(ctx context.Context, identity PluginLoginIdentity, channel
 	}
 	now := time.Now()
 	payload := pluginLoginPayload{
-		ChannelID:    channelID,
+		ChannelID:    channel.Id,
+		DraftChannel: draft,
 		KeyIndex:     keyIndex,
 		Add:          add,
 		CodeVerifier: verifier,
@@ -195,6 +244,46 @@ func StartPluginLogin(ctx context.Context, identity PluginLoginIdentity, channel
 		return PluginLoginResult{}, err
 	}
 	return flow.result(step), nil
+}
+
+// ConsumeDraftPluginLogin transfers a completed draft credential to channel
+// creation. AuthFlow consumption is one-time and bound to the original session.
+
+func ConsumeDraftPluginLogin(identity PluginLoginIdentity, token string, channel *model.Channel) (string, error) {
+	if channel == nil || channel.Type != constant.ChannelTypeTaskPlugin {
+		return "", common.NewMessage("Login flow is invalid or has expired")
+	}
+	pluginKey := channel.GetSetting().TaskPluginKey
+	match := model.AuthFlowMatch{Purpose: model.AuthFlowPurposePluginLogin, Provider: pluginKey, UserId: identity.UserID, SessionId: identity.SessionID}
+	flow, err := model.GetAuthFlow(token, match)
+	if err != nil {
+		return "", common.NewMessage("Login flow is invalid or has expired")
+	}
+	var payload pluginLoginPayload
+	if common.UnmarshalJsonStr(flow.Payload, &payload) != nil || !draftPluginLoginMatches(payload, channel) || payload.DraftCredential == "" || payload.Step != jsplugin.LoginStepDone {
+		return "", common.NewMessage("Login flow is invalid or has expired")
+	}
+	consumed, err := model.ConsumeAuthFlow(token, match)
+	if err != nil {
+		return "", common.NewMessage("Login flow is invalid or has expired")
+	}
+	if common.UnmarshalJsonStr(consumed.Payload, &payload) != nil || !draftPluginLoginMatches(payload, channel) || payload.DraftCredential == "" || payload.Step != jsplugin.LoginStepDone {
+		return "", common.NewMessage("Login flow is invalid or has expired")
+	}
+	return payload.DraftCredential, nil
+}
+
+func draftPluginLoginMatches(payload pluginLoginPayload, channel *model.Channel) bool {
+	if payload.DraftChannel == nil || payload.ChannelID != 0 {
+		return false
+	}
+	draft := payload.DraftChannel
+	setting := ""
+	if channel.Setting != nil {
+		setting = *channel.Setting
+	}
+	return draft.PluginKey == channel.GetSetting().TaskPluginKey &&
+		draft.BaseURL == channel.GetBaseURL() && draft.Setting == setting && draft.OtherSettings == channel.OtherSettings
 }
 
 // ContinuePluginLogin submits the browser's input to the current step.
@@ -248,6 +337,11 @@ func ContinuePluginLogin(ctx context.Context, identity PluginLoginIdentity, chan
 		return PluginLoginResult{}, err
 	}
 	return flow.result(step), nil
+}
+
+// ContinueDraftPluginLogin submits input to an unsaved channel's login flow.
+func ContinueDraftPluginLogin(ctx context.Context, identity PluginLoginIdentity, token string, input PluginLoginInput) (PluginLoginResult, error) {
+	return ContinuePluginLogin(ctx, identity, 0, token, input)
 }
 
 // CompletePluginLoginCallback handles the redirect back from the vendor,
@@ -347,9 +441,14 @@ func loadPluginLoginFlow(identity PluginLoginIdentity, token, pluginKey string) 
 	if err = common.UnmarshalJsonStr(stored.Payload, &payload); err != nil {
 		return nil, invalid
 	}
-	channel, err := model.GetChannelById(payload.ChannelID, true)
-	if err != nil {
-		return nil, invalid
+	var channel *model.Channel
+	if payload.DraftChannel != nil && payload.ChannelID == 0 {
+		channel = payload.DraftChannel.channel()
+	} else {
+		channel, err = model.GetChannelById(payload.ChannelID, true)
+		if err != nil {
+			return nil, invalid
+		}
 	}
 	plugin, err := loginPluginOfChannel(channel)
 	if err != nil {
@@ -576,6 +675,24 @@ func (f *pluginLoginFlow) finish(step jsplugin.LoginStep) (PluginLoginStepView, 
 			return
 		}
 		revokePluginCredentialData(f.plugin.Meta.Key, f.channel.GetBaseURL(), f.channel.GetSetting().Proxy, f.payload.ChannelID, f.channel.GetOtherSettings().PluginConfig, []json.RawMessage{step.Result.Credential})
+	}
+	if f.payload.DraftChannel != nil {
+		credential := jsplugin.Credential{Plugin: f.plugin.Meta.Key, Data: step.Result.Credential, Headers: step.Result.Headers, Query: step.Result.Query, ExpiresAt: step.Result.ExpiresAt, AccountID: step.Result.AccountID, Label: step.Result.Label}
+		line, err := credential.Line()
+		if err != nil {
+			revoke()
+			return PluginLoginStepView{}, err
+		}
+		next := f.payload
+		next.Step = jsplugin.LoginStepDone
+		next.DraftCredential = line
+		view := PluginLoginStepView{Type: jsplugin.LoginStepDone, Credential: &PluginCredentialView{Label: credential.Label, AccountID: credential.AccountID, ExpiresAt: credential.ExpiresAt}}
+		next.View = view
+		if !f.release(next) {
+			revoke()
+			return PluginLoginStepView{}, common.NewMessage("Login flow is invalid or has expired")
+		}
+		return view, nil
 	}
 	if _, err := model.ConsumeAuthFlow(f.token, f.match()); err != nil {
 		revoke()

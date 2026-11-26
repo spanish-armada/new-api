@@ -10,15 +10,15 @@
 // Setup
 //   1. Upload this file on the task plugin page (or POST /api/plugin/task) and
 //      switch it on.
-//   2. Create a channel of type "Task Plugin", bind this plugin, leave the key
+//   2. Configure a channel of type "Task Plugin", bind this plugin, leave the key
 //      empty, set the Base URL to https://api.anthropic.com, and list the
 //      models the account may serve.
-//   3. Start "login" on the channel. The dialog shows the claude.ai sign-in
+//   3. Start "login" before saving the channel. The dialog shows the claude.ai sign-in
 //      address and copies it for another device. After "Authorize" the browser
 //      lands on platform.claude.com and shows the authorization code; copy the
 //      whole address from the address bar, which carries ?code=...&state=...,
 //      and paste it into the dialog.
-//   4. Test the channel. The credential is refreshed automatically, and a
+//   4. After login completes, save the channel. Test it; the credential refreshes automatically, and a
 //      rejected token is refreshed and the request retried once.
 //
 // Behaviour notes
@@ -31,10 +31,11 @@
 //     writes to a log.
 
 const CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
-const AUTHORIZE_URL = "https://claude.com/cai/oauth/authorize";
+const AUTHORIZE_URL = "https://claude.com/oauth/authorize";
 const TOKEN_URL = "https://platform.claude.com/v1/oauth/token";
+const PROFILE_URL = "https://api.anthropic.com/api/oauth/profile";
 // Fixed by the client id: claude.ai redirects to its own callback page only.
-const REDIRECT_URI = "https://platform.claude.com/oauth/code/callback";
+const REDIRECT_URI = "http://localhost:7890/callback";
 const SCOPE =
   "org:create_api_key user:profile user:inference user:sessions:claude_code user:mcp_servers user:file_upload";
 const ANTHROPIC_VERSION = "2023-06-01";
@@ -60,7 +61,7 @@ export const meta = {
     en: "Claude accounts logged in with claude.ai OAuth, relayed over the Anthropic Messages API",
     zh: "使用 claude.ai OAuth 登录的 Claude 账号，通过 Anthropic Messages 接口转发",
   },
-  version: "1.2.0",
+  version: "1.3.1",
   author: { name: "local" },
   baseUrl: "https://api.anthropic.com",
   allowedHosts: ["claude.com", "platform.claude.com"],

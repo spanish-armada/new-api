@@ -958,6 +958,10 @@ func GetTaskPluginOptions(c *gin.Context) {
 			} else {
 				_, _, hasIcon = plugins.Icon(meta.Key)
 			}
+			models := meta.Models
+			if models == nil {
+				models = []string{}
+			}
 			option := gin.H{
 				"key":             meta.Key,
 				"name":            meta.Name,
@@ -967,7 +971,7 @@ func GetTaskPluginOptions(c *gin.Context) {
 				"baseUrl":         meta.BaseURL,
 				"sortPriority":    meta.SortPriority,
 				"website":         meta.Website,
-				"models":          meta.Models,
+				"models":          models,
 				"channelTypes":    meta.ChannelTypes,
 				"upstreams":       meta.Upstreams,
 				"usageSchema":     meta.UsageSchema,

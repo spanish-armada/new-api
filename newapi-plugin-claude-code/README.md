@@ -21,16 +21,16 @@ whether to do it is the administrator's decision.
 
 1. Upload `plugin.js` on the task plugin page, or `POST /api/plugin/task`
    with `{"source": "...", "remark": "claude-code"}`. Switch the plugin on.
-2. Create a channel of type **Task Plugin**, bind **claude-code**, and leave
+2. Configure a channel of type **Task Plugin**, bind **claude-code**, and leave
    the key empty. The channel Base URL can stay empty too: the plugin's
    **Upstream API address** setting decides where requests go, and falls back
    to the channel Base URL when it is empty.
 3. Fill the channel's model list with the models the account may serve.
-4. Press **login** on the channel. The browser opens claude.ai; after
+4. Press **Log in** before saving the channel. The browser opens claude.ai; after
    **Authorize** it lands on `platform.claude.com`, which shows the
    authorization code. Copy the whole address from the address bar — it
    carries `?code=...&state=...` — and paste it into the dialog.
-5. Test the channel, then enable it.
+5. When login completes, save the channel. Test it, then enable it.
 
 > To authorize on another device, use the sign-in address the dialog shows under
 > **Open sign-in page**: its **Copy sign-in link** button copies that address, so

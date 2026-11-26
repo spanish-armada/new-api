@@ -109,6 +109,31 @@ func TestPluginLoginRedirect(t *testing.T) {
 	assert.Equal(t, common.ChannelStatusEnabled, storedChannel(t, f.channel.Id).Status)
 }
 
+func TestPluginLoginDraftKeepsCredentialUntilChannelSave(t *testing.T) {
+	f := newLoginFixture(t, "login-draft", "redirect")
+	draft := *f.channel
+	draft.Id = 0
+	started, err := StartDraftPluginLogin(context.Background(), loginAdmin, &draft)
+	require.NoError(t, err)
+	require.Equal(t, 0, started.ChannelID)
+
+	completed, err := CompletePluginLoginCallback(context.Background(), loginAdmin, "login-draft", callbackParams(visitAuthorize(t, started.Step.URL)))
+	require.NoError(t, err)
+	require.Equal(t, "done", completed.Step.Type)
+	changed := draft
+	changed.OtherSettings = `{"plugin_config":{"account":"other"}}`
+	_, err = ConsumeDraftPluginLogin(loginAdmin, started.Flow, &changed)
+	require.Error(t, err)
+
+	credentialLine, err := ConsumeDraftPluginLogin(loginAdmin, started.Flow, &draft)
+	require.NoError(t, err)
+	credential, ok := jsplugin.ParseCredential(credentialLine)
+	require.True(t, ok)
+	assert.Equal(t, "login-draft", credential.Plugin)
+	_, err = ConsumeDraftPluginLogin(loginAdmin, started.Flow, &draft)
+	require.Error(t, err)
+}
+
 func TestPluginLoginPaste(t *testing.T) {
 	for _, tc := range []struct {
 		name  string

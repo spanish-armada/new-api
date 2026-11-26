@@ -3266,13 +3266,26 @@ const redirectStart = {
   },
 }
 
-test('a login plugin saves without a key, then logs in on the new channel', async () => {
+test('a login plugin completes login before saving the new channel', async () => {
   pluginOptions = [...plugins, loginPlugin]
   const post = vi.spyOn(api, 'post').mockImplementation(async (url) => {
     if (url === '/api/channel') {
       return { data: { success: true, message: '', data: { ids: [77] } } }
     }
-    if (url === '/api/channel/77/plugin_login') return redirectStart
+    if (url === '/api/channel/plugin_login/draft') {
+      return {
+        data: {
+          success: true,
+          data: {
+            flow: 'flow-1',
+            step: {
+              type: 'done',
+              credential: { index: 0, account_id: 'acct-1' },
+            },
+          },
+        },
+      }
+    }
     throw new Error(`Unexpected POST ${url}`)
   })
   const user = userEvent.setup()
@@ -3294,7 +3307,7 @@ test('a login plugin saves without a key, then logs in on the new channel', asyn
   expect(screen.queryByLabelText('API Key *')).not.toBeInTheDocument()
   expect(
     screen.getByText(
-      'This channel signs in with a provider account. Save the channel, then log in.'
+      'Log in with a provider account before saving this channel.'
     )
   ).toBeVisible()
   const addMode = screen.getByRole('combobox', { name: 'Add Mode' })
@@ -3310,35 +3323,30 @@ test('a login plugin saves without a key, then logs in on the new channel', asyn
   ).toBeVisible()
   await user.keyboard('{Escape}')
 
-  await user.click(screen.getByRole('button', { name: 'Save and log in' }))
-  const dialog = await screen.findByRole('dialog', {
-    name: 'Log in to Account Plugin',
-  })
+  await user.click(screen.getByRole('button', { name: 'Log in' }))
+  expect(
+    await screen.findByRole('button', { name: 'Create Channel' })
+  ).toBeVisible()
   expect(post).toHaveBeenNthCalledWith(
     1,
-    '/api/channel',
+    '/api/channel/plugin_login/draft',
     expect.objectContaining({
-      mode: 'single',
       channel: expect.objectContaining({ type: 61, key: null }),
     }),
     expect.anything()
   )
-  const payload = post.mock.calls[0]?.[1] as { channel: { setting: string } }
-  expect(JSON.parse(payload.channel.setting).task_plugin_key).toBe('acct')
-  expect(
-    await within(dialog).findByRole('button', { name: 'Copy sign-in link' })
-  ).toBeVisible()
+  expect(post).toHaveBeenCalledTimes(1)
+  await user.click(screen.getByRole('button', { name: 'Create Channel' }))
+  await waitFor(() => expect(post).toHaveBeenCalledTimes(2))
   expect(post).toHaveBeenNthCalledWith(
     2,
-    '/api/channel/77/plugin_login',
-    { key_index: null },
+    '/api/channel',
+    expect.objectContaining({
+      mode: 'single',
+      plugin_login_flow: 'flow-1',
+      channel: expect.objectContaining({ type: 61, key: null }),
+    }),
     expect.anything()
-  )
-  expect(
-    screen.queryByRole('button', { name: 'Save and log in' })
-  ).not.toBeInTheDocument()
-  await waitFor(() =>
-    expect(dialog.contains(document.activeElement)).toBe(true)
   )
 })
 
@@ -3555,7 +3563,7 @@ test('a login plugin picked while editing waits for the save before logging in',
   )
   expect(
     screen.getByText(
-      'This channel signs in with a provider account. Save the channel, then log in.'
+      'Log in with a provider account before saving this channel.'
     )
   ).toBeVisible()
   expect(
@@ -3575,10 +3583,10 @@ test('a task-only plugin that exports login logs in instead of taking a key', as
   expect(screen.queryByLabelText('API Key *')).not.toBeInTheDocument()
   expect(
     screen.getByText(
-      'This channel signs in with a provider account. Save the channel, then log in.'
+      'Log in with a provider account before saving this channel.'
     )
   ).toBeVisible()
-  expect(screen.getByRole('button', { name: 'Save and log in' })).toBeVisible()
+  expect(screen.getByRole('button', { name: 'Log in' })).toBeVisible()
 })
 
 test('a provider plugin without login keeps the API key input', async () => {

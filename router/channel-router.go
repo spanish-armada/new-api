@@ -97,6 +97,8 @@ var channelPermissionRoutes = []permissionRoute{
 	{method: http.MethodPost, path: "/:id/plugin_login", permission: authz.ChannelSensitiveWrite, handler: controller.StartPluginLogin},
 	{method: http.MethodPost, path: "/:id/plugin_login/continue", permission: authz.ChannelSensitiveWrite, handler: controller.ContinuePluginLogin},
 	{method: http.MethodPost, path: "/plugin_login/callback", permission: authz.ChannelSensitiveWrite, handler: controller.CompletePluginLoginCallback},
+	{method: http.MethodPost, path: "/plugin_login/draft", permission: authz.ChannelSensitiveWrite, handler: controller.StartDraftPluginLogin},
+	{method: http.MethodPost, path: "/plugin_login/draft/continue", permission: authz.ChannelSensitiveWrite, handler: controller.ContinueDraftPluginLogin},
 	{method: http.MethodGet, path: "/:id/plugin_credentials", permission: authz.ChannelRead, handler: controller.GetPluginCredentials},
 	{method: http.MethodGet, path: "/:id/codex/usage", permission: authz.ChannelRead, handler: controller.GetCodexChannelUsage},
 	{method: http.MethodGet, path: "/:id/codex/usage/reset-credits", permission: authz.ChannelRead, handler: controller.GetCodexChannelRateLimitResetCredits},

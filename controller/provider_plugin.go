@@ -9,6 +9,7 @@ import (
 	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/service/authz"
 
 	"github.com/gin-gonic/gin"
 )
@@ -52,18 +53,68 @@ func pluginLoginChannelID(c *gin.Context) (int, bool) {
 // the channel cache is reloaded and the change is audited.
 func finishPluginLogin(c *gin.Context, result service.PluginLoginResult, data gin.H) {
 	if credential := result.Step.Credential; credential != nil {
-		model.InitChannelCache()
-		recordManageAudit(c, "channel.update", map[string]any{
-			"id":             result.ChannelID,
-			"name":           result.ChannelName,
-			"changed_fields": []string{"key"},
-			"source":         "plugin_login",
-			"label":          credential.Label,
-			"account_id":     credential.AccountID,
-		})
+		if result.ChannelID > 0 {
+			model.InitChannelCache()
+			recordManageAudit(c, "channel.update", map[string]any{
+				"id":             result.ChannelID,
+				"name":           result.ChannelName,
+				"changed_fields": []string{"key"},
+				"source":         "plugin_login",
+				"label":          credential.Label,
+				"account_id":     credential.AccountID,
+			})
+		}
 	}
 	data["step"] = result.Step
 	common.ApiSuccess(c, data)
+}
+
+// StartDraftPluginLogin starts provider authentication before a new channel is saved.
+func StartDraftPluginLogin(c *gin.Context) {
+	identity, ok := pluginLoginIdentity(c)
+	if !ok {
+		return
+	}
+	var request struct {
+		Channel *model.Channel `json:"channel"`
+	}
+	if err := common.DecodeJson(c.Request.Body, &request); err != nil || request.Channel == nil {
+		common.ApiErrorT(c, "Invalid parameters")
+		return
+	}
+	if !authz.Can(c.GetInt("id"), c.GetInt("role"), authz.TaskPluginBind) {
+		common.ApiErrorStatus(c, 403, common.NewMessage("task plugin channels require the task_plugin.bind permission"))
+		return
+	}
+	if err := validateChannel(request.Channel, true); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	result, err := service.StartDraftPluginLogin(c.Request.Context(), identity, request.Channel)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	finishPluginLogin(c, result, gin.H{"flow": result.Flow})
+}
+
+// ContinueDraftPluginLogin advances authentication for an unsaved channel.
+func ContinueDraftPluginLogin(c *gin.Context) {
+	identity, ok := pluginLoginIdentity(c)
+	if !ok {
+		return
+	}
+	var request pluginLoginContinueRequest
+	if err := common.DecodeJson(c.Request.Body, &request); err != nil {
+		common.ApiErrorT(c, "Invalid parameters")
+		return
+	}
+	result, err := service.ContinueDraftPluginLogin(c.Request.Context(), identity, request.Flow, request.Input)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	finishPluginLogin(c, result, gin.H{})
 }
 
 // StartPluginLogin opens a plugin login flow on a channel.

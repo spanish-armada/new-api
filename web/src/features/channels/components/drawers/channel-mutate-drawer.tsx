@@ -187,6 +187,7 @@ import {
   hasModelConfigChanged,
   findMissingModelsInMapping,
   validateModelMappingJson,
+  transformFormDataToCreatePayload,
 } from '../../lib'
 import {
   getChannelConfigurationSection,
@@ -498,13 +499,26 @@ export function ChannelMutateDrawer({
     useState(false)
   const [clipboardConnectionInfo, setClipboardConnectionInfo] =
     useState<ChannelConnectionInfo | null>(null)
-  // Outlives the drawer: "Save and log in" closes it, then logs in.
+  // Keeps existing-channel login dialogs mounted after drawer actions.
   const [loginRequest, setLoginRequest] = useState<{
     channelId: number
     keyIndex: number | null
     add?: boolean
     plugin: PluginIconInput
   } | null>(null)
+  const [draftLoginOpen, setDraftLoginOpen] = useState(false)
+  const [draftLoginFlow, setDraftLoginFlow] = useState<string | null>(null)
+  const [draftLoginChannel, setDraftLoginChannel] =
+    useState<Partial<Channel> | null>(null)
+  const draftLoginConfigRef = useRef<string | null>(null)
+
+  useEffect(() => {
+    if (open) return
+    setDraftLoginOpen(false)
+    setDraftLoginFlow(null)
+    setDraftLoginChannel(null)
+    draftLoginConfigRef.current = null
+  }, [open])
 
   const isEditing = Boolean(currentRow)
   const requestedSide = isEditing ? 'left' : 'right'
@@ -1877,15 +1891,35 @@ export function ChannelMutateDrawer({
       const loginPlugin = pluginLogin ? boundTaskPlugin : undefined
       if (loginPlugin) data.key = ''
 
-      try {
-        const result = await channelMutation.mutateAsync(data)
-        if (!isEditing && loginPlugin && result.channelId) {
-          setLoginRequest({
-            channelId: result.channelId,
-            keyIndex: null,
-            plugin: loginPlugin,
-          })
+      let pluginLoginFlow: string | undefined
+      if (!isEditing && loginPlugin) {
+        const draftChannel = transformFormDataToCreatePayload(data).channel
+        const configSignature = JSON.stringify({
+          type: draftChannel.type,
+          base_url: draftChannel.base_url,
+          setting: draftChannel.setting,
+          settings: draftChannel.settings,
+          other: draftChannel.other,
+        })
+        if (!draftLoginFlow) {
+          draftLoginConfigRef.current = configSignature
+          setDraftLoginChannel(draftChannel)
+          setDraftLoginOpen(true)
+          return
         }
+        if (draftLoginConfigRef.current !== configSignature) {
+          setDraftLoginFlow(null)
+          draftLoginConfigRef.current = configSignature
+          setDraftLoginChannel(draftChannel)
+          setDraftLoginOpen(true)
+          toast.error(t('Login settings changed. Please log in again.'))
+          return
+        }
+        pluginLoginFlow = draftLoginFlow
+      }
+
+      try {
+        await channelMutation.mutateAsync({ data, pluginLoginFlow })
       } catch {
         // The mutation reports the server error; keep the draft open for correction.
       }
@@ -1903,6 +1937,7 @@ export function ChannelMutateDrawer({
       confirmMissingModelMappings,
       confirmStatusCodeRisk,
       channelMutation,
+      draftLoginFlow,
       t,
     ]
   )
@@ -4975,7 +5010,7 @@ export function ChannelMutateDrawer({
   if (isEditing) {
     submitLabel = t('Update Channel')
   } else if (pluginLogin) {
-    submitLabel = t('Save and log in')
+    submitLabel = draftLoginFlow ? t('Create Channel') : t('Log in')
   }
 
   let formContent: ReactNode
@@ -5484,6 +5519,22 @@ export function ChannelMutateDrawer({
             void queryClient.invalidateQueries({
               queryKey: channelsQueryKeys.lists(),
             })
+          }}
+        />
+      )}
+      {draftLoginOpen && draftLoginChannel && boundTaskPlugin && (
+        <PluginLoginDialog
+          open
+          onOpenChange={(nextOpen) => {
+            if (!nextOpen) setDraftLoginOpen(false)
+          }}
+          channelId={0}
+          draftChannel={draftLoginChannel}
+          keyIndex={null}
+          plugin={boundTaskPlugin}
+          onDone={(flow) => {
+            setDraftLoginFlow(flow)
+            setDraftLoginOpen(false)
           }}
         />
       )}

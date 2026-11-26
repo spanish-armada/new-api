@@ -72,9 +72,7 @@ export function PluginCredentialPanel(props: PluginCredentialPanelProps) {
       <div className='flex flex-col gap-1.5'>
         <p className='text-sm font-medium'>{t('Credentials')}</p>
         <p className='text-muted-foreground text-sm'>
-          {t(
-            'This channel signs in with a provider account. Save the channel, then log in.'
-          )}
+          {t('Log in with a provider account before saving this channel.')}
         </p>
       </div>
     )

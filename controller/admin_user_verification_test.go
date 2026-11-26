@@ -10,6 +10,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -229,6 +230,20 @@ func TestUserListEndpointsRequireRootRole(t *testing.T) {
 
 func TestCreateUserRequiresRootRole(t *testing.T) {
 	_, identity, _ := setupAdminUserTest(t)
+	previousGroupRatios := ratio_setting.GroupRatio2JSONString()
+	common.OptionMapRWMutex.RLock()
+	previousGroupRatioOption, hadGroupRatioOption := common.OptionMap["GroupRatio"]
+	common.OptionMapRWMutex.RUnlock()
+	t.Cleanup(func() {
+		assert.NoError(t, ratio_setting.UpdateGroupRatioByJSONString(previousGroupRatios))
+		common.OptionMapRWMutex.Lock()
+		if hadGroupRatioOption {
+			common.OptionMap["GroupRatio"] = previousGroupRatioOption
+		} else {
+			delete(common.OptionMap, "GroupRatio")
+		}
+		common.OptionMapRWMutex.Unlock()
+	})
 	body := `{"username":"new-member","password":"member-password-1","role":1}`
 
 	response := adminUserRequest(http.MethodPost, "/api/user/", body, "", identity, common.RoleAdminUser, nil, CreateUser)
@@ -250,12 +265,18 @@ func TestCreateUserRequiresRootRole(t *testing.T) {
 	require.True(t, result.Success, response.Body.String())
 	require.NoError(t, model.DB.Model(&model.User{}).Where("username = ?", "new-admin").Count(&count).Error)
 	assert.EqualValues(t, 1, count)
-	// The group stays the billing dimension requested by the caller (or the
-	// column default), never the username: a per-user group would leave the
-	// account in a group no channel serves.
 	var created model.User
 	require.NoError(t, model.DB.Where("username = ?", "new-admin").First(&created).Error)
-	assert.Equal(t, "default", created.Group)
+	assert.Equal(t, "new-admin", created.Group)
+	assert.Equal(t, 1, ratio_setting.GetGroupRatio("new-admin"))
+
+	response = adminUserRequest(http.MethodPost, "/api/user/", `{"username":"default-member","password":"member-password-1"}`, "", identity, common.RoleRootUser, nil, CreateUser)
+	require.NoError(t, common.Unmarshal(response.Body.Bytes(), &result))
+	require.True(t, result.Success, response.Body.String())
+	require.NoError(t, model.DB.Where("username = ?", "default-member").First(&created).Error)
+	assert.Equal(t, common.RoleCommonUser, created.Role)
+	assert.Equal(t, "default-member", created.Group)
+	assert.Equal(t, 1, ratio_setting.GetGroupRatio("default-member"))
 }
 
 func TestCreateUserRejectsNonStandardRole(t *testing.T) {
