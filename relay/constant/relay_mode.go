@@ -54,6 +54,15 @@ const (
 	RelayModeToolsFetch
 )
 
+// CanonicalRequestPath maps gateway aliases to the protocol path used by
+// channel routes. Playground chat completions shares the OpenAI chat endpoint.
+func CanonicalRequestPath(path string) string {
+	if strings.HasPrefix(path, "/pg/chat/completions") {
+		return "/v1/chat/completions" + strings.TrimPrefix(path, "/pg/chat/completions")
+	}
+	return path
+}
+
 func Path2RelayMode(path string) int {
 	relayMode := RelayModeUnknown
 	if strings.HasPrefix(path, "/v1/chat/completions") || strings.HasPrefix(path, "/pg/chat/completions") {

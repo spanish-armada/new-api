@@ -6,6 +6,7 @@ import (
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/pkg/jsplugin"
+	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 )
 
 var filterEvalOrder = []dto.ChannelFilterKind{
@@ -155,6 +156,10 @@ func providerChannelServes(ch *Channel, requestPath, modelName string) bool {
 	if ch.Type != constant.ChannelTypeTaskPlugin || requestPath == "" {
 		return false
 	}
+	// The playground chat route is an alias for the regular OpenAI chat
+	// completions endpoint. Match provider plugin routes against that canonical
+	// path so a plugin serving /v1/chat/completions can be selected there too.
+	requestPath = relayconstant.CanonicalRequestPath(requestPath)
 	plugin, ok := jsplugin.DefaultRegistry.Get(ch.GetSetting().TaskPluginKey)
 	if !ok || !plugin.Meta.HasProviderPart() {
 		return false
