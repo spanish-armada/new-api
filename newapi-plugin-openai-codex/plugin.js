@@ -16,7 +16,7 @@ export const meta = {
     en: "OpenAI Codex channel authenticated with a ChatGPT account",
     zh: "使用 ChatGPT 账号 OAuth 授权的 OpenAI Codex 渠道",
   },
-  version: "1.0.3",
+  version: "1.1.0",
   author: { name: "QuantumNous" },
   baseUrl: "https://chatgpt.com",
   allowedHosts: ["auth.openai.com"],
@@ -41,6 +41,20 @@ export const meta = {
       auth: { type: "none" },
     },
   ],
+  channelConfig: {
+    type: "object",
+    properties: {
+      pass_through_body: {
+        type: "boolean",
+        default: false,
+        title: { en: "Pass through request body", zh: "透传请求体" },
+        description: {
+          en: "Forward the client body unchanged; only stream=true is forced because Codex requires it.",
+          zh: "原样转发客户端请求体；仅按 Codex 要求强制 stream=true。",
+        },
+      },
+    },
+  },
   keyHint: {
     en: "Leave the key empty and use Log in",
     zh: "密钥留空，然后使用登录功能",
@@ -142,7 +156,7 @@ export function convertRequest(ctx, request) {
     throw new Error("Codex accepts JSON Responses API requests only.");
   }
   const converted = JSON.parse(JSON.stringify(body));
-  if (ctx.path === "/v1/responses/compact") {
+  if (ctx.path === "/v1/responses/compact" || passThroughBody(ctx)) {
     converted.stream = true;
     return { body: converted, stream: request.stream === true, nativeResponse: request.stream === true };
   }
@@ -291,4 +305,9 @@ function headerValue(headers, name) {
     if (key.toLowerCase() === wanted) return String(headers[key]);
   }
   return "";
+}
+
+function passThroughBody(ctx) {
+  const config = ctx && ctx.config;
+  return !!config && config.pass_through_body === true;
 }

@@ -16,12 +16,18 @@ export const meta = {
     en: "OpenAI Codex channel authenticated with a ChatGPT account",
     zh: "使用 ChatGPT 账号 OAuth 授权的 OpenAI Codex 渠道",
   },
-  version: "1.0.1",
+  version: "1.0.3",
   author: { name: "QuantumNous" },
   baseUrl: "https://chatgpt.com",
   allowedHosts: ["auth.openai.com"],
   models: ["gpt-6-luna"],
   relay: [
+    {
+      incoming_path: "/v1/chat/completions",
+      upstream_path: "/backend-api/codex/responses",
+      converter: "openai_chat_completions_to_openai_responses+plugin",
+      auth: { type: "none" },
+    },
     {
       incoming_path: "/v1/responses",
       upstream_path: "/backend-api/codex/responses",
@@ -138,30 +144,53 @@ export function convertRequest(ctx, request) {
   const converted = JSON.parse(JSON.stringify(body));
   if (ctx.path === "/v1/responses/compact") {
     converted.stream = true;
-    return { body: converted, stream: true, nativeResponse: true };
+    return { body: converted, stream: request.stream === true, nativeResponse: request.stream === true };
   }
   if (converted.instructions === undefined) converted.instructions = "";
   converted.store = false;
   delete converted.max_output_tokens;
   delete converted.temperature;
+  delete converted.top_p;
   delete converted.frequency_penalty;
   delete converted.presence_penalty;
   // The Codex backend requires streaming in the Responses API JSON payload.
-  // The returned `stream` option below only controls how the gateway reads the
-  // HTTP response; it does not add this field to the upstream body.
+  // The returned `stream` option controls response handling; this field is
+  // separately required in the upstream JSON body for Codex.
   converted.stream = true;
   return {
     body: converted,
-    stream: true,
-    nativeResponse: true,
+    stream: request.stream === true,
+    nativeResponse: request.stream === true,
     headers: { "OpenAI-Beta": "responses=experimental", originator: "codex_cli_rs" },
   };
 }
 
 export function convertResponse(ctx, response) {
+  const contentType = headerValue(response.headers, "content-type") || "application/json";
+  if (contentType.toLowerCase().includes("text/event-stream")) {
+    let completed = null;
+    for (const line of String(response.body || "").split(/\r?\n/)) {
+      if (!line.startsWith("data:")) continue;
+      const data = line.slice(5).trim();
+      if (!data || data === "[DONE]") continue;
+      let event;
+      try {
+        event = JSON.parse(data);
+      } catch (_) {
+        continue;
+      }
+      if ((event.type === "response.completed" || event.type === "response.done") && event.response) {
+        completed = event.response;
+      }
+    }
+    if (!completed) {
+      return { error: { status: 502, message: "OpenAI stream ended without a completed response." } };
+    }
+    return { body: completed, contentType: "application/json" };
+  }
   return {
     body: response.body || "",
-    contentType: headerValue(response.headers, "content-type") || "application/json",
+    contentType: contentType,
   };
 }
 
